@@ -34,7 +34,7 @@ def generate_launch_description():
 
     # ---------------- 串口参数 ----------------
     serial_params_file = os.path.join(
-        get_package_share_directory("rm_serial_python"), "config", "rm_serial_params.yaml"
+        get_package_share_directory("rm_serial"), "config", "rm_serial_params.yaml"
     )
 
     return LaunchDescription([
@@ -48,7 +48,7 @@ def generate_launch_description():
 
         # ----------- 启动串口通信节点 -----------
         Node(
-            package="rm_serial_python",
+            package="rm_serial",
             executable="rm_serial_node",
             name="rm_serial",
             output="screen",

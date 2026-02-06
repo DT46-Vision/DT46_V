@@ -10,9 +10,9 @@ rm_tracker:
     rotation_rpy_p: 0.0
     rotation_rpy_y: -180.0
 
-    show_rpy: true             # 是否打印 IMU 调试信息
+    show_rpy: false             # 是否打印 IMU 调试信息
     debug_info: false
-    display_res: false           # 是否显示 OpenCV 调试图像
+    display_res: true           # 是否显示 OpenCV 调试图像
 
     # ----------------------- TRACKER ---------------------
     target_color: 1             # 0: RED, 1: BLUE (当前要打的敌人颜色)
