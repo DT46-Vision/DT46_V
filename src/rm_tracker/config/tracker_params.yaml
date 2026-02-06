@@ -1,0 +1,49 @@
+rm_tracker:
+  ros__parameters:
+    # ---------- 打印 / 调试 ----------
+    dis_res: true
+    use_geometric_center: true
+    log_throttle_ms: 1000       # 日志输出节流(ms)，避免刷屏
+    fps_window_sec: 1.0         # FPS 统计窗口大小(秒)
+
+    # ---------- 追踪控制 ----------
+    use_kf: true                # 是否启用滤波器
+    max_lost_ms: 350            # 目标丢失前允许补偿时间 (毫秒)
+    tracking_color: 0           # 跟踪颜色: 0=红, 1=蓝, 10=不追踪
+    follow_decision: 0          # 是否跟随决策模块 (0=否, 1=是)
+    track_deep_tol: 10.0        # 追踪深度容差 (mm)
+    shoot_yaw_max: 1.5          # 最大允许 yaw 角 (deg)
+    shoot_pitch_max: 1.0        # 最大允许 pitch 角 (deg)
+
+    # ---------- 相机外参 ----------
+    camera_tx_m: 0.0
+    camera_ty_m: -0.03
+    camera_tz_m: 0.0
+    camera_yaw_deg: -4.0
+    camera_pitch_deg: 0.0
+    camera_roll_deg: 0.0
+
+    # ---------- 滤波参数（新架构） ----------
+    # 位移部分：CV + 滑动窗口拟合
+    q_acc: 1.0              # 过程噪声（加速度）方差，越大越灵敏
+    r_meas: 0.002             # 测量噪声方差，越大越稳重
+    win_size: 8              # 滑动窗口大小
+    poly_degree: 3           # 多项式拟合阶数（2=二次曲线）
+    alpha: 0.7               # Kalman 与拟合结果的融合权重 (0~1)
+    future_scale: 1.0        # 预测外推比例 (1.0 = 纯当前帧)
+
+    # 姿态部分：SO(3) EKF
+    q_rot: 0.002             # 姿态过程噪声（Q），越大响应越快
+    r_rot: 0.01              # 姿态测量噪声（R），越大越稳
+
+    # ---------- 弹道参数 ----------
+    use_ballistics: true
+    bullet_speed_mps: 30.0
+    gravity: 9.81
+    extra_latency_s: 0.02
+
+    # ---------- 弹道收敛/稳态 ----------
+    ballistic_min_dist_m: 0.25
+    ballistic_max_pitch_deg: 40.0
+    ballistic_conv_tol_deg: 0.05
+    ballistic_time_damping: 0.5

@@ -27,11 +27,6 @@ def generate_launch_description():
         "~/ros_vision/Kielas_Vision.perspective"
     )
 
-    # # ---------------- rqt 界面配置 ----------------
-    # rviz_file = os.path.expanduser(
-    #     "~/ros_vision/Kielas_Vision.rviz"
-    # )
-
     # ---------------- 串口参数 ----------------
     serial_params_file = os.path.join(
         get_package_share_directory("rm_serial_python"), "config", "rm_serial_params.yaml"
@@ -100,14 +95,5 @@ def generate_launch_description():
             arguments=["--perspective-file", perspective_file],
             output="screen",
         ),
-
-        # Node(
-        #     package="rviz2",
-        #     executable="rviz2",
-        #     name="rviz2",
-        #     arguments=["-d", rviz_file],
-        #     output="screen",
-        # ),
-
 
     ])

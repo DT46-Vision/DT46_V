@@ -14,10 +14,12 @@ find_package(std_msgs REQUIRED)
 # find_package(<dependency> REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/ArmorTracking.msg"
   "msg/ArmorsMsg.msg"
   "msg/ArmorInfo.msg"
-  "msg/GimbalControl.msg"
   "msg/SerialReceive.msg"
+  "msg/OdoMsg.msg"
+  "msg/NavigationMsg.msg"
   "msg/Decision.msg"
   DEPENDENCIES std_msgs
 )

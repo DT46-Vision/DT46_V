@@ -27,11 +27,6 @@ def generate_launch_description():
         "~/ros_vision/Kielas_Vision.perspective"
     )
 
-    # # ---------------- rqt 界面配置 ----------------
-    # rviz_file = os.path.expanduser(
-    #     "~/ros_vision/Kielas_Vision.rviz"
-    # )
-
     return LaunchDescription([
         # ----------- 可配置的 launch 参数 -----------
         DeclareLaunchArgument(name="params_file", default_value=params_file),
@@ -84,13 +79,5 @@ def generate_launch_description():
             arguments=["--perspective-file", perspective_file],
             output="screen",
         ),
-
-        # Node(
-        #     package="rviz2",
-        #     executable="rviz2",
-        #     name="rviz2",
-        #     arguments=["-d", rviz_file],
-        #     output="screen",
-        # ),
 
     ])

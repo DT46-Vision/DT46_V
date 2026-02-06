@@ -1,0 +1,7 @@
+rm_serial_python:
+  ros__parameters:
+    device_name: "/dev/ttyUSB0"   # 串口设备 (Linux 下通常是 /dev/ttyUSBx)
+    baud_rate: 115200             # 波特率
+    flow_control: "none"          # 流控方式 (none/hardware/software)
+    parity: "none"                # 校验位 (none/even/odd)
+    stop_bits: "1"                # 停止位 (1/1.5/2)

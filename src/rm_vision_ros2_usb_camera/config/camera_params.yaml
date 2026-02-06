@@ -1,18 +1,26 @@
-usb_camera:
+/usb_camera_node:   # <--- 必须修改：要和 C++ 中的 Node("名字") 保持一致
   ros__parameters:
+    web_cam: False
+    web_cam_url: "http://192.168.1.216:4747/video"
     camera_index: 0
+
+    # 编码格式: "MJPG" 或 "YUYV" or "NV12" or "RGB3"
+    pixel_format: "MJPG"
+
+    # 输出编码格式 mac -> "rgb8" other -> "bgr8"
+    encoding_str: "bgr8"
 
     # 图像尺寸
     frame_width: 640
     frame_height: 480
 
-    # 帧率
+    # 帧率 (640x480 下 MJPG 通常能跑很高，240是合理的)
     fps: 240.0
-    pixel_format: "MJPG"
 
     # 曝光
+    # 如果设为 True，exposure_time 将被忽略（取决于相机硬件逻辑）
     exposure_auto: True
-    exposure_time: 800   # 单位一般是微秒 (us)
+    exposure_time: 800
 
     # 增益
-    gain: 128   # 范围 0-255，具体取决于相机驱动
+    gain: 128

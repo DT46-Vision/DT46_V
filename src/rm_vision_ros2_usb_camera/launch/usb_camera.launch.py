@@ -13,7 +13,7 @@ def generate_launch_description():
     node = Node(
         package='usb_camera',
         executable='usb_camera_node',
-        name='usb_camera',
+        name='usb_camera_node',
         output='screen',
         parameters=[
             params_file,
