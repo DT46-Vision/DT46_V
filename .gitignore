@@ -1,0 +1,97 @@
+# ==============================
+# ROS / Catkin 构建输出
+# ==============================
+build/
+build_isolated/
+devel/
+devel_isolated/
+install/
+log/
+logs/
+bin/
+msg_gen/
+srv_gen/
+CATKIN_IGNORE
+
+# ==============================
+# ROS 消息/服务自动生成文件
+# ==============================
+msg/*Action.msg
+msg/*ActionFeedback.msg
+msg/*ActionGoal.msg
+msg/*ActionResult.msg
+msg/*Feedback.msg
+msg/*Goal.msg
+msg/*Result.msg
+msg/_*.py
+srv/_*.py
+
+# ==============================
+# 动态参数生成 (dynamic reconfigure)
+# ==============================
+*.cfgc
+/cfg/cpp/
+/cfg/*.py
+
+# ==============================
+# Python 缓存文件
+# ==============================
+__pycache__/
+*.pyc
+
+# ==============================
+# C++ / IDE 工具生成文件
+# ==============================
+# .vscode/
+.project
+.cproject
+CMakeLists.txt.user
+qtcreator-*
+*.user
+
+# ==============================
+# 文档/配置文件
+# ==============================
+*.dox
+*.wikidoc
+/planning/cfg
+/planning/docs
+/planning/src
+
+# ==============================
+# 临时文件
+# ==============================
+*~
+.#*        # Emacs 临时文件
+*.swp      # Vim swap
+*.swo      # Vim swap
+*.tmp      # 临时文件
+
+# ==============================
+# 数据文件 / 训练数据
+# ==============================
+Camera/
+cifar-100-python/
+datasets/
+armor_bag*/
+*.png
+*.zip
+*.pcd
+
+# ==============================
+# 通用日志文件
+# ==============================
+*.log
+
+# ==============================
+# 相机编译文件
+# ==============================
+
+MindVisionSDK/
+MVS.deb
+
+# ==============================
+# docker img
+# ==========
+
+*.tar

@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>usb_camera</name>
+  <version>0.1.0</version>
+  <description>
+    USB camera node for ROS 2 Humble using OpenCV (V4L2 backend).
+    Publishes /image_raw and /camera_info, with dynamic parameters.
+  </description>
+
+  <maintainer email="c1470759@outlook.com">kielas</maintainer>
+  <license>MIT</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>image_transport</depend>
+  <depend>cv_bridge</depend>
+  <depend>camera_info_manager</depend>
+  <depend>OpenCV</depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

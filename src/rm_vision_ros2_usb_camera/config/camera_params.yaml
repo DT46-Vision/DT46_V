@@ -1,0 +1,18 @@
+usb_camera:
+  ros__parameters:
+    camera_index: 0
+
+    # 图像尺寸
+    frame_width: 640
+    frame_height: 480
+
+    # 帧率
+    fps: 240.0
+    pixel_format: "MJPG"
+
+    # 曝光
+    exposure_auto: True
+    exposure_time: 800   # 单位一般是微秒 (us)
+
+    # 增益
+    gain: 128   # 范围 0-255，具体取决于相机驱动

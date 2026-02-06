@@ -1,0 +1,56 @@
+rm_tracker:
+  ros__parameters:
+    # ------------------------ NODE -----------------------
+    log_throttle_ms: 1000
+
+    follow_decision: false    # 是否跟随决策节点的颜色选择
+
+    # 陀螺仪到相机 (IMU -> Cam) 旋转标定
+    rotation_rpy_r: 0.0
+    rotation_rpy_p: 0.0
+    rotation_rpy_y: -180.0
+
+    show_rpy: true             # 是否打印 IMU 调试信息
+    debug_info: false
+    display_res: false           # 是否显示 OpenCV 调试图像
+
+    # ----------------------- TRACKER ---------------------
+    target_color: 1             # 0: RED, 1: BLUE (当前要打的敌人颜色)
+
+    # [外参] 相机 -> 枪口 (Camera to Gun) (x:右, y:下, z:前)
+    # 注意：单位是米 (m) 和 弧度 (rad)
+    cam_to_gun_pos_x: 0.0       # 你的代码默认是 10.0，建议改为实际测量值，例如 0.0
+    cam_to_gun_pos_y: -0.05     # 假设相机在枪管上方 5cm
+    cam_to_gun_pos_z: 0.0
+    cam_to_gun_rpy_r: 0.0
+    cam_to_gun_rpy_p: 0.0
+    cam_to_gun_rpy_y: 0.0
+
+    # [逻辑与阈值]
+    dist_tol: 0.05              # 预处理：两块板距离容差 (m)
+    max_match_distance: 0.2     # 匹配：最大距离阈值 (m)
+    max_match_yaw_diff: 57.0     # 匹配：判定跳变的 Yaw 差值 (deg)
+    tracking_thres: 5           # 连续检测帧数 (进入 TRACKING) - int
+    lost_thres: 10              # 连续丢失帧数 (进入 LOST) - int
+
+    # [EKF Q/R 参数] - 参考此前代码中的调优值
+    ekf_QR_q_xyz: 20.0          # Process Noise Q: 位置/速度
+    ekf_QR_q_yaw: 100.0         # Process Noise Q: 偏航角
+    ekf_QR_q_r: 800.0           # Process Noise Q: 半径 (给大一点允许快速变径)
+
+    ekf_QR_r_xyz_factor: 0.05   # Measurement Noise R: 位置因子
+    ekf_QR_r_yaw: 0.02          # Measurement Noise R: 角度方差
+
+    # [车辆物理参数]
+    radius_r1: 0.26             # 车辆半径 1 (m)
+    radius_r2: 0.38              # 车辆半径 2 (m)
+    radius_r_max: 0.4              # 车辆最大半径 (m)
+    radius_r_min: 0.12              # 车辆最小半径 (m)
+
+    # [发射参数]
+    bullet_speed: 28.0            # 弹速 (m/s)
+
+    # 发弹角度阈值
+    yaw_threshold_deg: 5.0     # 允许发射的 yaw 角度阈值
+    pitch_threshold_deg: 5.0   # 允许发射的 pitch 角度阈值
+
