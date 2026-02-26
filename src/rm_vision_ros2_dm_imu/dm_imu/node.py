@@ -33,7 +33,7 @@ class DmImuNode(Node):
         self.declare_parameter('baudrate', 921600)
         self.declare_parameter('frame_id', 'imu_link')
         self.declare_parameter('publish_rpy_in_degree', True) # 若希望 /imu/rpy 以“度”发布，把 False 改 True
-        self.declare_parameter('verbose', True)          # 终端打印
+        self.declare_parameter('verbose', False)          # 终端打印
         self.declare_parameter('qos_reliable', True)     # 发布端 QoS（默认 Reliable，RViz 直接可见）
         # 新增：三个话题的开关（默认全开）
         self.declare_parameter('publish_imu_data', False)  # /imu/data

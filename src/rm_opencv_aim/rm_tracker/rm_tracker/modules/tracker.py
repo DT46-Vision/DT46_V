@@ -76,6 +76,7 @@ class Tracker:
         self.last_yaw = 0.0                                 # 上一帧的连续化 Yaw 角 (用于处理角度跳变与去卷绕)
         self.dz = 0.0                                       # [几何] 当前板与另一组板的高度差 (z轴偏移)
         self.another_r = 0.26                               # [几何] 另一组装甲板的旋转半径
+        self.min_spinning_speed_tol = 0.05                  # 小陀螺最低门限
         self.target = None                                  # 最终解算出的目标状态
         self.bullet_speed = 28.0                            # 弹道速度 (m/s)
         self.muzzle_target = None                           # 弹道解算后的目标点
@@ -521,58 +522,80 @@ class Tracker:
 
         return muzzle_target
 
-    def solve_ballistic(self, muzzle_target, cam_to_gun_rpy):
+    def solve_ballistic(self, muzzle_target, cam_to_gun_rpy, imu_rpy):
         """
-        弹道解算：世界坐标 -> 云台控制角度 (Yaw, Pitch)
-        包含：空气阻力模型 + 机械安装误差补偿 (cam_to_gun_rpy)
+        全向弹道解算 (Iterative Method)
+
+        Args:
+            muzzle_target:  Armor对象 (世界坐标，原点在枪口)
+            cam_to_gun_rpy: [roll, pitch, yaw] 机械安装误差/静态补偿 (单位: 度)
+            imu_rpy:        [roll, pitch, yaw] 当前云台姿态 (单位: 度)
         """
-        if muzzle_target is None:
+        # 使用 self.bullet_speed 读取类成员变量，避免参数传错
+        bullet_speed = self.bullet_speed
+
+        if muzzle_target is None or bullet_speed < 1e-3:
             return [0.0, 0.0, False]
 
+        # 1. 提取坐标
         x, y, z = muzzle_target.pos
+        dist_h = math.sqrt(x**2 + y**2) # 水平距离
 
-        # --- 1. 基础物理距离 ---
-        dist_h = math.sqrt(x**2 + y**2)
-
-        # 安全保护：距离太近直接返回
         if dist_h < 0.1:
             return [0.0, 0.0, False]
 
-        # --- 2. 物理角度解算 (Physics) ---
+        # 2. 物理参数
+        g = 9.81
+        v = bullet_speed
+        k = 0.035  # 空气阻力系数
 
-        # Yaw: 简单的几何指向
-        yaw_physics = math.atan2(y, x)
+        # 3. 迭代求解【物理】绝对 Pitch 角度
+        # 目标是找到一个 theta，使得子弹的抛物线经过 (dist_h, z)
 
-        # Pitch: 带空气阻力的抛物线迭代
-        # 参数设置
-        g = 9.8
-        v = self.bullet_speed
-        k = 0.035 # 空气阻力系数 (需实测，0为真空)
+        # 初始猜测
+        target_pitch_rad = math.atan2(z, dist_h)
 
-        pitch_physics = math.atan2(z, dist_h) # 初始猜测
-
+        # 迭代求解 (补偿重力下坠 + 空气阻力)
         for i in range(5):
-            cos_pitch = math.cos(pitch_physics)
-            if cos_pitch < 1e-4: cos_pitch = 1e-4
+            cos_theta = math.cos(target_pitch_rad)
+            if cos_theta < 1e-4: cos_theta = 1e-4
 
-            # 飞行时间 (带阻力)
+            # 计算飞行时间 t
             if k > 1e-5:
-                t = (math.exp(k * dist_h) - 1) / (k * v * cos_pitch)
+                t = (math.exp(k * dist_h) - 1) / (k * v * cos_theta)
             else:
-                t = dist_h / (v * cos_pitch)
+                t = dist_h / (v * cos_theta)
 
-            # 下坠补偿
+            # 计算下坠补偿量
             y_drop = 0.5 * g * t**2
+
+            # 更新目标角度
             z_aim = z + y_drop
-            pitch_physics = math.atan2(z_aim, dist_h)
+            target_pitch_rad = math.atan2(z_aim, dist_h)
 
-        offset_pitch = math.radians(cam_to_gun_rpy[1]) # 假设 index 1 是 Pitch
-        offset_yaw   = math.radians(cam_to_gun_rpy[2]) # 假设 index 2 是 Yaw
+        # 4. 计算 Yaw (几何角度)
+        target_yaw_rad = math.atan2(y, x)
 
-        final_yaw   = yaw_physics   + offset_yaw
-        final_pitch = pitch_physics + offset_pitch
+        # 5. 加上【机械补偿】 (cam_to_gun_rpy)
+        # 这一步不能少，用于修正枪管和相机的固有偏差
+        offset_pitch_rad = math.radians(cam_to_gun_rpy[1])
+        offset_yaw_rad   = math.radians(cam_to_gun_rpy[2])
 
-        return [final_yaw, final_pitch, False]
+        final_target_pitch = target_pitch_rad + offset_pitch_rad
+        final_target_yaw   = target_yaw_rad + offset_yaw_rad
+
+        # 6. 计算电控控制增量 (Delta)
+        current_pitch_rad = math.radians(imu_rpy[1])
+        current_yaw_rad   = math.radians(imu_rpy[2])
+
+        # 【Yaw】 使用最短路径差值
+        delta_yaw = shortest_angular_distance(current_yaw_rad, final_target_yaw)
+
+        # 【Pitch】 根据你的实测，你的 IMU 定义是反的，所以这里用加法
+        # (即: 目标角度 + 当前负角度 = 偏差)
+        delta_pitch = final_target_pitch + current_pitch_rad
+
+        return [delta_yaw, delta_pitch, True]
 
     def gimbal_to_deg(self, gimbal_control):
         return [math.degrees(gimbal_control[0]), math.degrees(gimbal_control[1]), False]
@@ -636,7 +659,7 @@ class Tracker:
             # 【步骤B】 转换到枪口系，专门用于解算弹道
             target_muzzle = self.world_to_muzzle(target_cam, self.cam_to_gun_pos, tf, imu_rpy)
 
-            gimbal_control = self.solve_ballistic(target_muzzle, self.cam_to_gun_rpy)
+            gimbal_control = self.solve_ballistic(target_muzzle, self.cam_to_gun_rpy, imu_rpy)
             gimbal_control = self.gimbal_to_deg(gimbal_control)
             gimbal_control = self.can_fire(gimbal_control)
             self.gimbal_control = gimbal_control
