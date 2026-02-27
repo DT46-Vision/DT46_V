@@ -477,6 +477,7 @@ class RmTracker(Node):
                         rclpy.parameter.Parameter.Type.INTEGER,
                         int(msg.color)
                     )])
+                    self.tracker.target_color = msg.color
                     self.get_logger().info(f"追踪颜色切换为 {int(msg.color)}")
         except Exception as e:
             self.get_logger().error(f"处理 Decision 异常：{e}")

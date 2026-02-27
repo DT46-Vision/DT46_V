@@ -3,19 +3,19 @@ rm_tracker:
     # ------------------------ NODE -----------------------
     log_throttle_ms: 1000
 
-    follow_decision: false    # 是否跟随决策节点的颜色选择
+    follow_decision: true    # 是否跟随决策节点的颜色选择
 
     # 陀螺仪到相机 (IMU -> Cam) 旋转标定
-    rotation_rpy_r: 0.0
+    rotation_rpy_r: -4.0
     rotation_rpy_p: 0.0
-    rotation_rpy_y: -180.0
+    rotation_rpy_y: 90.0
 
     show_rpy: false             # 是否打印 IMU 调试信息
     debug_info: false
-    display_res: true           # 是否显示 OpenCV 调试图像
+    display_res: false           # 是否显示 OpenCV 调试图像
 
     # ----------------------- TRACKER ---------------------
-    target_color: 1             # 0: RED, 1: BLUE (当前要打的敌人颜色)
+    target_color: 0             # 0: RED, 1: BLUE (当前要打的敌人颜色)
 
     # [外参] 相机 -> 枪口 (Camera to Gun) (x:右, y:下, z:前)
     # 注意：单位是米 (m) 和 弧度 (rad)

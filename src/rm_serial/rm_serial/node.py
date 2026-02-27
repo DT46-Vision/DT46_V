@@ -29,7 +29,7 @@ class RMSerialDriver(Node):
 
         # 创建订阅者
         self.sub_gimbal_control = self.create_subscription(
-            GimbalControl, "/gimbal/control", self.send_data, 10
+            GimbalControl, "/tracker/gimbal_control", self.send_data, 10
         )
 
         # 创建发布者 1: 决策信息
@@ -122,9 +122,6 @@ class RMSerialDriver(Node):
                 calculated_crc = get_crc16_check_sum(data_payload)
 
                 if calculated_crc != received_crc:
-                    # 校验失败时打印 Hex 用于调试
-                    raw_hex = ' '.join([f'{b:02x}' for b in full_packet])
-                    self.get_logger().warn(f"校验失败 | 收:{hex(received_crc)} 算:{hex(calculated_crc)} | Raw: {raw_hex}")
                     continue
 
                 # 5. 数据解包 (14字节)
@@ -150,22 +147,20 @@ class RMSerialDriver(Node):
 
                 # 发布决策消息 (注意：match 字段已被移除)
                 self.pub_uart_receive_decision.publish(serial_receive_msg)
-
             except (serial.SerialException, struct.error, ValueError) as e:
                 self.get_logger().error(f"接收数据异常: {str(e)}")
                 self.reopen_port()
 
     def send_data(self, msg):
         try:
-            header = b'\xA5'
+            header = 0xA5
             pitch  = msg.pitch
-            yaw    = msg.yaw
-            shoot  = msg.shoot_flag
-
+            yaw    = -msg.yaw
+            shoot  = msg.can_fire
             # 1. 打包数据载荷 (10字节)
             # <BffB: Header(1), Pitch(4), Yaw(4), Shoot(1)
             # 这里的顺序必须严格对应
-            data_payload = struct.pack("<BffB", header, pitch, yaw, shoot)
+            data_payload = struct.pack("<Bffi", header, pitch, yaw, shoot)
 
             # 2. 计算 CRC16 校验码
             # 注意：是对前 10 个字节(data_payload) 计算 CRC
@@ -176,7 +171,6 @@ class RMSerialDriver(Node):
             packet = data_payload + struct.pack("<H", checksum)
 
             self.serial_port.write(packet)
-
         except Exception as e:
             self.get_logger().error(f"发送数据异常: {str(e)}")
 
@@ -194,7 +188,7 @@ class RMSerialDriver(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = RMSerialDriver("rm_serial_python")
+    node = RMSerialDriver("rm_serial")
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

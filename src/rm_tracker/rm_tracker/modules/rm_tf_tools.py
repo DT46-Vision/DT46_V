@@ -47,6 +47,12 @@ class RmTF:
         rotation_rpy : [rx, ry, rz] 需要叠加的旋转/修正 (欧拉角)
         order        : 旋转顺序，默认 'xyz'
         """
+        # 增加数据有效性校验，防止 NaN 或 Inf 导致四元数异常崩溃
+        if np.any(np.isnan(raw_rpy)) or np.any(np.isinf(raw_rpy)) or \
+        np.any(np.isnan(rotation_rpy)) or np.any(np.isinf(rotation_rpy)):
+            # 遇到无效数据时直接返回，或者根据节点逻辑返回 None / 上一帧数据
+            # self.get_logger().warn('接收到无效的 IMU RPY 数据，已跳过处理。')
+            return raw_rpy 
 
         # 1. 把“当前的姿态”变成旋转对象 R1
         r_current = R.from_euler(order, raw_rpy, degrees=True)
@@ -55,12 +61,6 @@ class RmTF:
         r_fix = R.from_euler(order, rotation_rpy, degrees=True)
 
         # 3. 姿态叠加 (矩阵乘法)
-        # 逻辑：Final = Fix * Current (相当于在当前姿态的基础上，叠加一个修正)
-        # 注意：乘法顺序很重要。
-        # 如果 rotation_rpy 是“世界坐标系下的修正”，放在左边 (Fix * Current)
-        # 如果 rotation_rpy 是“自身坐标系下的修正”，放在右边 (Current * Fix)
-        # 针对你的 [90] + [-90] -> [0] 的需求，在这个简单 Z 轴场景下左右乘结果一样，
-        # 但通常坐标系变换（父子关系）是左乘。
         r_final = r_current * r_fix
 
         # 4. 变回欧拉角
@@ -73,8 +73,7 @@ class RmTF:
         # 计算相对角度
         relative_yaw = fixed_rpy[2] - self.yaw
 
-        # 【核心修改】归一化到 [-180, 180]
-        # 公式逻辑：先加180，对360取模，再减180
+        # 归一化到 [-180, 180]
         fixed_rpy[2] = (relative_yaw + 180) % 360 - 180
 
         return fixed_rpy
