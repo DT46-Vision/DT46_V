@@ -22,20 +22,15 @@ def generate_launch_description():
         get_package_share_directory("rm_tracker"), "config", "tracker_params.yaml"
     )
 
-    # ---------------- 装甲板追踪参数 ----------------
+    # ---------------- imu参数 ----------------
     dm_imu_params_file = os.path.join(
-        get_package_share_directory("dm_imu"), "config", "paramas.yaml"
+        get_package_share_directory("dm_imu"), "config", "dm_imu_params.yaml"
     )
 
     # ---------------- rqt 界面配置 ----------------
     perspective_file = os.path.expanduser(
         "~/ros_vision/Kielas_Vision.perspective"
     )
-
-    # # ---------------- rqt 界面配置 ----------------
-    # rviz_file = os.path.expanduser(
-    #     "~/ros_vision/Kielas_Vision.rviz"
-    # )
 
     return LaunchDescription([
         # ----------- 可配置的 launch 参数 (命令行可覆盖) -----------

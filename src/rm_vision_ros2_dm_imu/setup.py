@@ -12,7 +12,7 @@ setup(
         (f'share/{package_name}', ['package.xml']),
         (f'share/{package_name}/launch', ['launch/dm_imu.launch.py']),
         (f'share/{package_name}/launch', ['launch/dm_imu_rviz.launch.py']),
-        (f'share/{package_name}/config', ['config/params.yaml']),
+        (f'share/{package_name}/config', ['config/dm_imu_params.yaml']),
         (f'share/{package_name}/rviz', ['rviz/imu.rviz']),
     ],
     install_requires=[

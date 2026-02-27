@@ -40,25 +40,18 @@ class DmImuNode(Node):
         self.declare_parameter('publish_rpy', True)       # /imu/rpy
         self.declare_parameter('publish_pose', False)      # /imu/pose
 
-        def _p(name, default=None):
-            try:
-                v = self.get_parameter(name).value
-                return default if v in (None, '') else v
-            except Exception:
-                return default
-
-        self.port = _p('port', '/dev/ttyACM0')
-        self.frame_id = _p('frame_id', 'imu_link')
-        self.publish_rpy = bool(_p('publish_rpy', True))
-        self.publish_rpy_in_degree = bool(_p('publish_rpy_in_degree', True))
-        self.verbose = bool(_p('verbose', True))
-        qos_reliable = bool(_p('qos_reliable', True))
+        self.port = self.get_parameter('port').value
+        self.frame_id = self.get_parameter('frame_id').value
+        self.publish_rpy = self.get_parameter('publish_rpy').value
+        self.publish_rpy_in_degree = self.get_parameter('publish_rpy_in_degree').value
+        self.verbose = self.get_parameter('verbose').value
+        qos_reliable = self.get_parameter('qos_reliable').value
         # 新增：三个话题的总开关
-        self.publish_imu_data = bool(_p('publish_imu_data', False))
-        self.publish_rpy = bool(_p('publish_rpy', True))
-        self.publish_pose = bool(_p('publish_pose', False))
+        self.publish_imu_data = self.get_parameter('publish_imu_data').value
+        self.publish_rpy = self.get_parameter('publish_rpy').value
+        self.publish_pose = self.get_parameter('publish_pose').value
 
-        baud = _p('baudrate', 921600)
+        baud = self.get_parameter('baudrate').value
         try:
             self.baudrate = int(baud)
         except (TypeError, ValueError):
