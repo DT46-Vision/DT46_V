@@ -179,7 +179,6 @@ class RMSerialDriver(Node):
 
         except Exception as e:
             self.get_logger().error(f"发送数据异常: {str(e)}")
-            self.reopen_port()
 
     def reopen_port(self):
         self.get_logger().warn("正在重连串口...")
