@@ -42,7 +42,7 @@ __pycache__/
 # ==============================
 # C++ / IDE 工具生成文件
 # ==============================
-# .vscode/
+*.db
 .project
 .cproject
 CMakeLists.txt.user

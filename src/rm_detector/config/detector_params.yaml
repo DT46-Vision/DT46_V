@@ -20,6 +20,10 @@ rm_detector:
     detect_color: 2
     display_mode: false
 
+    # ---- 局部识别 ROI裁切----
+    roi_crop: false
+    roi_scale: 0.5
+
     # ---- 其他参数 ----
     use_geometric_center: true
     print_period_ms: 1000

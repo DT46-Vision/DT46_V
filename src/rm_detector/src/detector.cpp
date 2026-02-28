@@ -76,6 +76,13 @@ namespace DT46_VISION{
     ArmorDetector::ArmorDetector(int detect_color, bool display_mode, int binary_val, const Params& params)
         : binary_val(binary_val), color(detect_color), display_mode(display_mode), params(params) {}
 
+    void ArmorDetector::update_roi_crop(bool new_roi_crop_val) {
+        params.roi_crop = new_roi_crop_val;
+    }
+
+    void ArmorDetector::update_roi_scale(double new_roi_scale_val) {
+        params.roi_scale = std::clamp(new_roi_scale_val, 0.1, 1.0);
+    }
     void ArmorDetector::update_light_area_min(int new_light_area_min) {
         params.light_area_min = new_light_area_min;
     }
@@ -130,6 +137,7 @@ namespace DT46_VISION{
             return cv::Mat();
         }
         img = img_input.clone();
+        
         cv::Mat gray_img;
         cv::cvtColor(img, gray_img, cv::COLOR_BGR2GRAY);
         cv::threshold(gray_img, img_binary, binary_val, 255, cv::THRESH_BINARY);
@@ -444,12 +452,24 @@ namespace DT46_VISION{
 
 
     cv::Mat ArmorDetector::draw_img() {
-        cv::Mat img_draw = img.clone();
-        img_draw = draw_rect(img_draw);
-        img_draw = draw_lights(img_draw);
-        img_drawn = draw_armors(img_draw);
-        return img_drawn;
+    cv::Mat img_draw = original_img.clone();  // 用原图作为底图
+    if (img_draw.empty()) {
+        img_draw = img.clone();  // 回退
     }
+
+    // 绘制裁剪区域蓝色边缘
+    if (params.roi_crop && !last_roi.empty()) {
+        cv::rectangle(img_draw, last_roi, cv::Scalar(255, 0, 0), 2);  // 蓝线，粗细 2
+    }
+
+    // 原有绘制
+    
+    img_draw = draw_rect(img_draw);
+    img_draw = draw_lights(img_draw);
+    img_drawn = draw_armors(img_draw);
+
+    return img_drawn;
+}
 
     std::tuple<cv::Mat, cv::Mat, cv::Mat, cv::Mat> ArmorDetector::display() {
         if (display_mode == true) {
@@ -464,10 +484,66 @@ namespace DT46_VISION{
     }
 
     std::vector<Armor> ArmorDetector::detect_armors(const cv::Mat& img_input) {
-        img_binary = process(img_input);
+        if (img_input.empty()){
+            return {};
+        }
+
+        original_img = img_input.clone();
+    
+        //判断 roi 局部模式
+
+        cv::Mat working_img = img_input;     // img_input ---> working_img
+        cv::Rect roi_rect(0, 0, img_input.cols, img_input.rows);
+        bool using_crop = false;
+
+        if (params.roi_crop && params.roi_scale > 0.0 && params.roi_scale <1.0){
+            int crop_w = static_cast<int>(img_input.cols * params.roi_scale);
+            int crop_h = static_cast<int>(img_input.rows * params.roi_scale);
+            int center_x = img_input.cols / 2;
+            int center_y = img_input.rows / 2;
+
+            int x = std::max(0,center_x - crop_w / 2);
+            int y = std::max(0,center_y - crop_h / 2);
+            crop_w = std::min(img_input.cols - x , crop_w);
+            crop_h = std::min(img_input.rows - y, crop_h);
+            
+            roi_rect = cv::Rect(x, y, crop_w, crop_h);
+
+            if (roi_rect.area() >= 100 * 100){  //最小面积阈值
+                working_img = img_input(roi_rect).clone();
+                using_crop = true;
+            }
+        }
+
+        img = working_img;
+        img_binary = process(working_img);
         lights = find_lights(img_binary);
         armors = is_armor(lights);
-        return armors;
+
+        if (using_crop) {
+        int offset_x = roi_rect.x;
+        int offset_y = roi_rect.y;
+
+        for (auto& light : lights) {
+            light.up.x    += offset_x;
+            light.up.y    += offset_y;
+            light.down.x  += offset_x;
+            light.down.y  += offset_y;
+            light.cx      += offset_x;
+            light.cy      += offset_y;
+        }
+    
+
+        for (auto& armor : armors) {
+            armor.light1_up.x   += offset_x;   armor.light1_up.y   += offset_y;
+            armor.light1_down.x += offset_x;   armor.light1_down.y += offset_y;
+            armor.light2_up.x   += offset_x;   armor.light2_up.y   += offset_y;
+            armor.light2_down.x += offset_x;   armor.light2_down.y += offset_y;
+        }
     }
 
+        last_roi = roi_rect;  // 记录给 draw_img 使用
+
+        return armors;
+    }
 } // namespace DT46_VISION

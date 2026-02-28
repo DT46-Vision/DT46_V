@@ -29,12 +29,17 @@ using namespace std;
 namespace DT46_VISION {
 
     class ArmorDetectorNode : public rclcpp::Node {
+        
     public:
         ArmorDetectorNode() : Node("rm_detector") {
             // ---------------- 参数声明 ----------------
             // 先声明所有参数（从 detector_params.yaml 复制默认值）
             this->declare_parameter<std::string>("cls_model_file", "mlp.onnx");
 
+            // roi 裁剪参数
+            this->declare_parameter<bool>("roi_crop", false);
+            this->declare_parameter<double>("roi_scale", 0.5);
+            
             // 灯条过滤参数
             this->declare_parameter<int>("light_area_min", 5);
             this->declare_parameter<double>("light_h_w_ratio", 5.0);
@@ -77,14 +82,16 @@ namespace DT46_VISION {
                 get_required_param<double>("height_rate_tol"),
                 get_required_param<double>("height_multiplier_min"),
                 get_required_param<double>("height_multiplier_max"),
+                get_required_param<bool>("roi_crop"),
+                get_required_param<double>("roi_scale")
             };
-
+            
             detect_color_        = get_required_param<int>("detect_color");
             display_mode_        = get_required_param<bool>("display_mode");
             binary_val_          = get_required_param<int>("binary_val");
             use_geometric_center_= get_required_param<bool>("use_geometric_center");
             print_period_ms_.store(get_required_param<int>("print_period_ms")); // 多线程访问
-
+            
             // ---------------- Detector 初始化 ----------------
             detector_ = std::make_shared<ArmorDetector>(detect_color_, display_mode_, binary_val_, params);
             pnp_      = std::make_shared<PNP>(this->get_logger());
@@ -108,7 +115,7 @@ namespace DT46_VISION {
             publisher_armor_img_  = this->create_publisher<sensor_msgs::msg::Image>("/detector/img_armor", 10);
             publisher_armor_processed_img_  = this->create_publisher<sensor_msgs::msg::Image>("/detector/img_armor_processed", 10);
 
-            // 工作线程
+            // 工作线程detect_color_
             running_.store(true);
             worker_ = std::thread(&ArmorDetectorNode::processing_loop, this);
 
@@ -351,6 +358,8 @@ namespace DT46_VISION {
                 } else if (name == "detect_color") { detector_->update_detect_color(param.as_int());
                 } else if (name == "display_mode") { detector_->update_display_mode(param.as_bool()); display_mode_ = param.as_bool();
                 } else if (name == "print_period_ms") { print_period_ms_.store(param.as_int());
+                } else if (name == "roi_crop") { detector_->update_roi_crop(param.as_bool());
+                } else if (name == "roi_scale") { detector_->update_roi_scale(param.as_double());
                 }
             }
 

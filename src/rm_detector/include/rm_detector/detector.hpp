@@ -3,6 +3,7 @@
 
 #include <opencv2/opencv.hpp>
 #include <tuple>
+#include <algorithm>
 #include <iostream>
 #include <vector>
 #include <cmath>
@@ -47,6 +48,7 @@ namespace DT46_VISION {
 
         Armor(float height_multiplier, const Light& light1, const Light& light2, NumberClassifier::Result res);
         int get_id() const;
+        
     };
 
     // 定义 Params 结构体
@@ -60,6 +62,8 @@ namespace DT46_VISION {
         double height_rate_tol;
         double height_multiplier_min;
         double height_multiplier_max;
+        bool roi_crop;
+        double roi_scale;
     };
 
     class ArmorDetector {
@@ -77,8 +81,14 @@ namespace DT46_VISION {
         int color;
         bool display_mode;
 
+        bool roi_crop = false;
+        double roi_scale = 0.5;
+
         Params params;
 
+        cv::Rect last_roi;
+        cv::Mat original_img; 
+    
         cv::Point2f dst_armor_pts[4] = {
             cv::Point2f(0, 125),                // left-up
             cv::Point2f(89, 125),               // right-up
@@ -107,6 +117,9 @@ namespace DT46_VISION {
         void update_binary_val(int new_binary_val);
         void update_detect_color(int new_color);
         void update_display_mode(bool new_display_mode);
+
+        void update_roi_crop(bool new_roi_crop_val);
+        void update_roi_scale(double new_roi_scale_val);
 
         cv::Mat process(const cv::Mat& img_input);
         std::vector<Light> find_lights(const cv::Mat& img_binary_input);
