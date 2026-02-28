@@ -111,6 +111,7 @@ namespace DT46_VISION {
 
             publisher_armors_     = this->create_publisher<rm_interfaces::msg::ArmorsMsg>("/detector/armors_info", 10);
             publisher_result_img_ = this->create_publisher<sensor_msgs::msg::Image>("/detector/result", 10);
+            publisher_crop_img_    = this->create_publisher<sensor_msgs::msg::Image>("/detector/crop_img", 10);
             publisher_bin_img_    = this->create_publisher<sensor_msgs::msg::Image>("/detector/bin_img", 10);
             publisher_armor_img_  = this->create_publisher<sensor_msgs::msg::Image>("/detector/img_armor", 10);
             publisher_armor_processed_img_  = this->create_publisher<sensor_msgs::msg::Image>("/detector/img_armor_processed", 10);
@@ -245,13 +246,13 @@ namespace DT46_VISION {
                 cv::Mat frame = frame_ptr->image;
 
                 // -------- 下面是原有的识别与发布逻辑 (保持不变) --------
-                cv::Mat bin, result, img_armor, img_armor_processed;
+                cv::Mat crop, bin, result, img_armor, img_armor_processed;
                 std::vector<Armor> armors;
                 bool detection_error = false;
                 try {
                     armors = detector_->detect_armors(frame);
                     // 注意：display() 内部如果涉及耗时绘图，建议仅在调试时开启
-                    std::tie(bin, result, img_armor, img_armor_processed) = detector_->display();
+                    std::tie(crop, bin, result, img_armor, img_armor_processed) = detector_->display();
                 } catch (const std::exception& e) {
                     RCLCPP_ERROR(this->get_logger(), "Detection error: %s", e.what());
                     detection_error = true;
@@ -285,6 +286,8 @@ namespace DT46_VISION {
 
                 // 图片发布建议加上 display_mode_ 判断，否则带宽压力巨大
                 if (display_mode_) {
+                    if (!crop.empty())
+                        publisher_crop_img_->publish(*cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", crop).toImageMsg());
                     if (!bin.empty())
                         publisher_bin_img_->publish(*cv_bridge::CvImage(std_msgs::msg::Header(), "mono8", bin).toImageMsg());
                     if (!result.empty())
@@ -383,6 +386,7 @@ namespace DT46_VISION {
         rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr           publisher_armor_img_;
         rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr           publisher_armor_processed_img_;
         rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr           publisher_bin_img_;
+        rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr           publisher_crop_img_;
         rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr callback_handle_;
 
         // ---- 模块实例
