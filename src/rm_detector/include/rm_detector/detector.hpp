@@ -81,9 +81,6 @@ namespace DT46_VISION {
         int color;
         bool display_mode;
 
-        bool roi_crop = false;
-        double roi_scale = 0.5;
-
         Params params;
 
         cv::Rect last_roi;
