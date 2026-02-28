@@ -1,0 +1,26 @@
+image_width: 1440
+image_height: 1080
+camera_name: hik_camera
+camera_matrix:
+  rows: 3
+  cols: 3
+  data: [1434.52111,    0.     ,  683.18333,
+            0.     , 1429.88589,  566.933  ,
+            0.     ,    0.     ,    1.     ]
+distortion_model: plumb_bob
+distortion_coefficients:
+  rows: 1
+  cols: 5
+  data: [-0.392532, 0.177901, -0.001093, -0.000636, 0.000000]
+rectification_matrix:
+  rows: 3
+  cols: 3
+  data: [1., 0., 0.,
+         0., 1., 0.,
+         0., 0., 1.]
+projection_matrix:
+  rows: 3
+  cols: 4
+  data: [1280.81771,    0.     ,  673.22268,    0.     ,
+            0.     , 1345.3837 ,  569.61869,    0.     ,
+            0.     ,    0.     ,    1.     ,    0.     ]

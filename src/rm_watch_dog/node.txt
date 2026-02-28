@@ -1,0 +1,8 @@
+节点 -> 文件 -> 话题
+rm_detector -> rm_detector_node -> /detector/bin_img and /detector/armors_img and /detector/armors_info
+rm_tracker -> rm_tracker_node -> /tracker/target
+rm_serial_python -> rm_serial_node -> /nav/decision
+usb_camera -> usb_camera_node -> /image_raw and /camera_info
+launch hik_camera -> hik_camera.launch.py -> /image_raw and /camera_info
+launch mindvision_camera -> mindvision_camera.launch.py -> /image_raw and /camera_info
+

@@ -1,0 +1,25 @@
+rm_detector:
+  ros__parameters:
+    cls_model_file: 'mlp.onnx'   # 文件名
+
+    # ---- 灯条过滤参数 ----
+    light_area_min: 5
+    light_h_w_ratio: 2.0
+    light_angle_min: -35
+    light_angle_max: 35
+    light_red_ratio: 1.0
+    light_blue_ratio: 1.0
+
+    # ---- 装甲板匹配参数 ----
+    height_rate_tol: 1.8
+    height_multiplier_min: 1.0
+    height_multiplier_max: 3.0
+
+    # ---- 图像处理参数 ----
+    binary_val: 150
+    detect_color: 2
+    display_mode: false
+
+    # ---- 其他参数 ----
+    use_geometric_center: true
+    print_period_ms: 1000
