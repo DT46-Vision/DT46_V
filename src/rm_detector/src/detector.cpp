@@ -29,6 +29,13 @@ namespace DT46_VISION{
         return std::tan(angle_radians);
     }
 
+    cv::Point2f point_solver(const cv::Point2f& cropped_point, const cv::Rect& roi_rect){
+        cv:: Point2f raw_point = cropped_point;
+        raw_point.x = raw_point.x + roi_rect.x;
+        raw_point.y = raw_point.y + roi_rect.y;
+        return raw_point;
+    }
+
     // Light 类的构造函数实现
     Light::Light(const cv::Point2f& up, const cv::Point2f& down, int color)
         : up(up), down(down), color(color) {
@@ -37,13 +44,19 @@ namespace DT46_VISION{
         height = calculate_distance(up, down);
     }
 
-    Armor::Armor(float height_multiplier, const Light& light1, const Light& light2, NumberClassifier::Result res)
+    Armor::Armor(float height_multiplier, const Light& light1, const Light& light2, NumberClassifier::Result res, bool using_crop, const cv::Rect& roi_rect)
         : height_multiplier(height_multiplier), light1_up(light1.up), light1_down(light1.down),
         light2_up(light2.up), light2_down(light2.down),
         res(res) {
 
         color = light1.color;
         armor_id = get_id();
+        if (using_crop) {
+            light1_up = point_solver(light1.up, roi_rect);
+            light1_down = point_solver(light1.down, roi_rect);
+            light2_up = point_solver(light2.up, roi_rect);
+            light2_down = point_solver(light2.down, roi_rect);
+        }
     }
 
     int Armor::get_id() const {
@@ -76,6 +89,13 @@ namespace DT46_VISION{
     ArmorDetector::ArmorDetector(int detect_color, bool display_mode, int binary_val, const Params& params)
         : binary_val(binary_val), color(detect_color), display_mode(display_mode), params(params) {}
 
+    void ArmorDetector::update_roi_crop(bool new_roi_crop_val) {
+        params.roi_crop = new_roi_crop_val;
+    }
+
+    void ArmorDetector::update_roi_scale(double new_roi_scale_val) {
+        params.roi_scale = std::clamp(new_roi_scale_val, 0.1, 1.0);
+    }
     void ArmorDetector::update_light_area_min(int new_light_area_min) {
         params.light_area_min = new_light_area_min;
     }
@@ -130,8 +150,31 @@ namespace DT46_VISION{
             return cv::Mat();
         }
         img = img_input.clone();
+        //判断 roi 局部模式
+        cv::Mat working_img = img;     // img ---> working_img
+        crop_img = cv::Mat(1, 1, CV_8UC1, cv::Scalar(0));
+
+        if (params.roi_crop){
+            int crop_w = static_cast<int>(img.cols * params.roi_scale);
+            int crop_h = static_cast<int>(img.rows * params.roi_scale);
+            int center_x = img.cols / 2;
+            int center_y = img.rows / 2;
+
+            int x = std::max(0,center_x - crop_w / 2);
+            int y = std::max(0,center_y - crop_h / 2);
+            crop_w = std::min(img.cols - x , crop_w);
+            crop_h = std::min(img.rows - y, crop_h);
+
+            roi_rect = cv::Rect(x, y, crop_w, crop_h);
+
+            if (roi_rect.area() > 0){  //最小面积阈值
+                crop_img = img(roi_rect).clone(); // 裁剪
+                working_img = crop_img;
+            }
+        }
+
         cv::Mat gray_img;
-        cv::cvtColor(img, gray_img, cv::COLOR_BGR2GRAY);
+        cv::cvtColor(working_img, gray_img, cv::COLOR_BGR2GRAY);
         cv::threshold(gray_img, img_binary, binary_val, 255, cv::THRESH_BINARY);
         return img_binary;
     }
@@ -177,13 +220,17 @@ namespace DT46_VISION{
 
             cv::Mat roi(1, length, CV_8UC3, cv::Scalar(0, 0, 0));
 
+            cv::Mat raw = img;
+            if (params.roi_crop){
+                raw = crop_img;
+            }
             for (int i = 0; i < length; ++i) {
                 float t = static_cast<float>(i) / length;
                 int current_x = static_cast<int>(up_x + (down_x - up_x) * t);
                 int current_y = static_cast<int>(up_y + (down_y - up_y) * t);
 
                 if (current_x >= 0 && current_x < img.cols && current_y >= 0 && current_y < img.rows) {
-                    roi.at<cv::Vec3b>(0, i) = img.at<cv::Vec3b>(current_y, current_x);
+                    roi.at<cv::Vec3b>(0, i) = raw.at<cv::Vec3b>(current_y, current_x);
                 }
             }
 
@@ -233,7 +280,12 @@ namespace DT46_VISION{
 
         cv::Mat H = cv::getPerspectiveTransform(src_armor_pts, dst_armor_pts);
         cv::Mat roi;
-        cv::warpPerspective(img, roi, H, cv::Size(89, 125));
+        cv::Mat raw;
+        raw = img;
+        if (params.roi_crop){
+            raw = crop_img;
+        }
+        cv::warpPerspective(raw, roi, H, cv::Size(89, 125));
         img_armor = roi;
 
         if (!roi.empty() && classifier_) {
@@ -313,7 +365,7 @@ namespace DT46_VISION{
 
                 // 只要通过几何验证就是一个装甲板
                 if (res.class_id >= 0 && res.class_id < 3) {
-                    armors_found.emplace_back(height_multiplier, sorted_lights[i], sorted_lights[j], res);
+                    armors_found.emplace_back(height_multiplier, sorted_lights[i], sorted_lights[j], res, params.roi_crop, roi_rect);
                     used[i] = used[j] = true; // 标记两个灯条已用
                     break; // i 已经匹配成功，不再尝试别的 j
                 }
@@ -325,6 +377,9 @@ namespace DT46_VISION{
     }
 
     cv::Mat ArmorDetector::draw_rect(cv::Mat img_draw) {
+        if(params.roi_crop){
+            cv::rectangle(img_draw, roi_rect, cv::Scalar(255, 0, 0), 2);  // 蓝色，厚度2
+        }
         // 获取图像尺寸
         int img_height = img_draw.rows;
         int img_width = img_draw.cols;
@@ -374,13 +429,22 @@ namespace DT46_VISION{
 
 
     cv::Mat ArmorDetector::draw_lights(cv::Mat img_draw) {
+
         for (const auto& light : lights) {
+            cv::Point2f light_up = light.up;
+            cv::Point2f light_down = light.down;
+            cv::Point2f light_center = cv::Point(light.cx, light.cy);
+            if(params.roi_crop){
+                light_up   = point_solver(light_up, roi_rect);
+                light_down = point_solver(light_down, roi_rect);
+                light_center = point_solver(light_center, roi_rect);
+            }
             if (light.color == 0) {
-                cv::line(img_draw, light.up, light.down, cv::Scalar(0, 100, 255), 1);
-                cv::circle(img_draw, cv::Point(light.cx, light.cy), 1, cv::Scalar(255, 0, 0), -1);
+                cv::line(img_draw, light_up, light_down, cv::Scalar(0, 100, 255), 1);
+                cv::circle(img_draw, light_center, 1, cv::Scalar(255, 0, 0), -1);
             } else if (light.color == 1) {
-                cv::line(img_draw, light.up, light.down, cv::Scalar(200, 71, 90), 1);
-                cv::circle(img_draw, cv::Point(light.cx, light.cy), 1, cv::Scalar(0, 0, 255), -1);
+                cv::line(img_draw, light_up, light_down, cv::Scalar(200, 71, 90), 1);
+                cv::circle(img_draw, light_center, 1, cv::Scalar(0, 0, 255), -1);
             }
         }
         return img_draw;
@@ -444,30 +508,34 @@ namespace DT46_VISION{
 
 
     cv::Mat ArmorDetector::draw_img() {
-        cv::Mat img_draw = img.clone();
+        cv::Mat img_draw = img.clone();  // 回退
+        // 原有绘制
         img_draw = draw_rect(img_draw);
         img_draw = draw_lights(img_draw);
         img_drawn = draw_armors(img_draw);
+
         return img_drawn;
     }
 
-    std::tuple<cv::Mat, cv::Mat, cv::Mat, cv::Mat> ArmorDetector::display() {
+    std::tuple<cv::Mat, cv::Mat, cv::Mat, cv::Mat, cv::Mat> ArmorDetector::display() {
         if (display_mode == true) {
             img_drawn = draw_img();
-            return std::make_tuple(img_binary, img_drawn, img_armor, img_armor_processed);
+            return std::make_tuple(crop_img, img_binary, img_drawn, img_armor, img_armor_processed);
         } else if (display_mode == false) {
-            return std::make_tuple(cv::Mat(1, 1, CV_8UC1, cv::Scalar(0)), cv::Mat(1, 1, CV_8UC1, cv::Scalar(0)), cv::Mat(1, 1, CV_8UC1, cv::Scalar(0)), cv::Mat(1, 1, CV_8UC1, cv::Scalar(0)));
+            return std::make_tuple(cv::Mat(1, 1, CV_8UC1, cv::Scalar(0)), cv::Mat(1, 1, CV_8UC1, cv::Scalar(0)), cv::Mat(1, 1, CV_8UC1, cv::Scalar(0)), cv::Mat(1, 1, CV_8UC1, cv::Scalar(0)), cv::Mat(1, 1, CV_8UC1, cv::Scalar(0)));
         } else {
             std::cerr << "Invalid display mode" << std::endl;
-            return std::make_tuple(cv::Mat(1, 1, CV_8UC1, cv::Scalar(0)), cv::Mat(1, 1, CV_8UC1, cv::Scalar(0)), cv::Mat(1, 1, CV_8UC1, cv::Scalar(0)), cv::Mat(1, 1, CV_8UC1, cv::Scalar(0)));
+            return std::make_tuple(cv::Mat(1, 1, CV_8UC1, cv::Scalar(0)), cv::Mat(1, 1, CV_8UC1, cv::Scalar(0)), cv::Mat(1, 1, CV_8UC1, cv::Scalar(0)), cv::Mat(1, 1, CV_8UC1, cv::Scalar(0)), cv::Mat(1, 1, CV_8UC1, cv::Scalar(0)));
         }
     }
 
     std::vector<Armor> ArmorDetector::detect_armors(const cv::Mat& img_input) {
+        if (img_input.empty()){
+            return {};
+        }
         img_binary = process(img_input);
         lights = find_lights(img_binary);
         armors = is_armor(lights);
         return armors;
     }
-
 } // namespace DT46_VISION
