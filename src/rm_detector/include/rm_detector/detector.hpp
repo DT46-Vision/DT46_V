@@ -3,12 +3,9 @@
 
 #include <opencv2/opencv.hpp>
 #include <tuple>
-#include <algorithm>
-#include <iostream>
 #include <vector>
 #include <cmath>
 #include <utility>
-#include <set>
 #include "rm_detector/classifier.hpp"
 
 using namespace cv;
