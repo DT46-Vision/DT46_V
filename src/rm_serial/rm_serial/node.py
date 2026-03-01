@@ -74,12 +74,21 @@ class RMSerialDriver(Node):
         self.declare_parameter("flow_control", "none")
         self.declare_parameter("parity", "none")
         self.declare_parameter("stop_bits", "1")
+        # 声明帧头参数及默认值
+        self.declare_parameter("send_header", 0xA5)
+        self.declare_parameter("receive_header", 0x5A)
 
         self.device_name = self.get_parameter("device_name").value
         self.baud_rate = self.get_parameter("baud_rate").value
         self.flow_control = self.get_parameter("flow_control").value
         self.parity = self.get_parameter("parity").value
         self.stop_bits = self.get_parameter("stop_bits").value
+        # 获取帧头参数
+        self.send_header = self.get_parameter("send_header").value
+        self.receive_header = self.get_parameter("receive_header").value
+
+        # 将接收帧头转换为 bytes 类型，供后续比对使用
+        self.receive_header_bytes = bytes([self.receive_header])
 
     def receive_data(self):
         serial_receive_msg = Decision()
@@ -96,7 +105,7 @@ class RMSerialDriver(Node):
             try:
                 # 1. 查找帧头
                 header = self.serial_port.read(1)
-                if not header or header != b'\xA5':
+                if not header or header != self.receive_header_bytes:
                     continue
 
                 # 2. 读取剩余数据 (15字节)
@@ -153,7 +162,7 @@ class RMSerialDriver(Node):
 
     def send_data(self, msg):
         try:
-            header = 0xA5
+            header = self.send_header
             pitch  = msg.pitch
             yaw    = -msg.yaw
             shoot  = msg.can_fire

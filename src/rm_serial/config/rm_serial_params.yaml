@@ -1,7 +1,9 @@
 rm_serial:
   ros__parameters:
-    device_name: "/dev/ttyACM2"   # 串口设备 (Linux 下通常是 /dev/ttyUSBx)
-    baud_rate: 115200             # 波特率
-    flow_control: "none"          # 流控方式 (none/hardware/software)
-    parity: "none"                # 校验位 (none/even/odd)
-    stop_bits: "1"                # 停止位 (1/1.5/2)
+    device_name: "/dev/ttyACM2"
+    baud_rate: 115200
+    flow_control: "none"
+    parity: "none"
+    stop_bits: "1"
+    send_header: 0xA5      # 发送帧头
+    receive_header: 0x5A   # 接收帧头
