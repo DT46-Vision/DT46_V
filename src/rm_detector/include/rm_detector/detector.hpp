@@ -83,9 +83,6 @@ namespace DT46_VISION {
 
         Params params;
 
-        cv::Rect last_roi;
-        cv::Mat original_img;
-
         cv::Point2f dst_armor_pts[4] = {
             cv::Point2f(0, 125),                // left-up
             cv::Point2f(89, 125),               // right-up

@@ -331,6 +331,10 @@ namespace DT46_VISION{
             ) {
                 res = get_armor_result(light1, light2);
         }
+        else{
+            img_armor = cv::Mat(1, 1, CV_8UC1, cv::Scalar(0));
+            img_armor_processed = cv::Mat(1, 1, CV_8UC1, cv::Scalar(0));
+        }
         return {res, distance / height};
     }
 
