@@ -470,12 +470,12 @@ class Tracker:
         yaw_center_to_cam = math.atan2(-yc, -xc)
 
         # 小陀螺状态更新
-        if self.spin == False and self.ekf.X[7] > self.min_spinning_vel:  
+        if self.spin == False and abs(self.ekf.X[7]) > self.min_spinning_vel:  
             self.min_spinning_frame_count += 1
             if self.min_spinning_frame_count > self.min_spinning_frame:
                 self.min_spinning_frame_count = 0
                 self.spin = True
-        else:
+        elif abs(self.ekf.X[7]) < self.min_spinning_vel:
             self.min_spinning_frame_count = 0
             self.spin = False
         
@@ -887,10 +887,11 @@ class Tracker:
 
 
         cv2.putText(draw, f"[{spin_status}]", (start_x, start_y + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.8, spin_status_color, 2)
-        cv2.putText(draw, f"Dist : {dist:.2f} m", (start_x, start_y + line_step * 1), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
-        cv2.putText(draw, f"Pitch: {self.gimbal_control[1]:.2f} deg", (start_x, start_y + line_step * 2), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
-        cv2.putText(draw, f"Yaw  : {self.gimbal_control[0]:.2f} deg", (start_x, start_y + line_step * 3), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
-        cv2.putText(draw, f"Diff : {angle_diff_deg:.1f} deg", (start_x, start_y + line_step * 4), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
-        cv2.putText(draw, f"[{status_text}]", (start_x, start_y + line_step * 5 + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+        cv2.putText(draw, f"yaw_val: {self.ekf.X[7]:.2f} rad", (start_x, start_y + line_step * 1), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
+        cv2.putText(draw, f"Dist : {dist:.2f} m", (start_x, start_y + line_step * 2), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
+        cv2.putText(draw, f"Pitch: {self.gimbal_control[1]:.2f} deg", (start_x, start_y + line_step * 3), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
+        cv2.putText(draw, f"Yaw  : {self.gimbal_control[0]:.2f} deg", (start_x, start_y + line_step * 4), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
+        cv2.putText(draw, f"Diff : {angle_diff_deg:.1f} deg", (start_x, start_y + line_step * 5), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
+        cv2.putText(draw, f"[{status_text}]", (start_x, start_y + line_step * 6 + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
 
         return draw
