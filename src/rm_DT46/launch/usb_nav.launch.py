@@ -29,7 +29,7 @@ def generate_launch_description():
 
     # ---------------- rqt 界面配置 ----------------
     perspective_file = os.path.expanduser(
-        "~/ros_vision/Kielas_Vision.perspective"
+        "~/DT46_V/Kielas_Vision.perspective"
     )
 
     return LaunchDescription([
