@@ -53,6 +53,8 @@ class RmTracker(Node):
         self.declare_parameter('radius_r2', 0.26)               # 旋转半径参数 - r2
         self.declare_parameter('radius_r_max', 0.4)             # 旋转半径参数 - r_max
         self.declare_parameter('radius_r_min', 0.12)            # 旋转半径参数 - r_min
+        self.declare_parameter('min_spinning_frame', 10)        # 小陀螺门限
+        self.declare_parameter('min_spinning_vel', 2.5)         # 旋转速度
         self.declare_parameter('bullet_speed', 28.0)            # 子弹速度
         self.declare_parameter('yaw_threshold_deg', 5.0)        # 允许发射的 yaw 角度阈值
         self.declare_parameter('pitch_threshold_deg', 2.0)      # 允许发射的 pitch 角度阈值
@@ -106,6 +108,9 @@ class RmTracker(Node):
             'r_max': radius_r_max,
             'r_min': radius_r_min
         }
+        # 反小陀螺参数
+        min_spinning_frame = self.get_parameter('min_spinning_frame').value
+        min_spinning_vel = self.get_parameter('min_spinning_vel').value
         bullet_speed = self.get_parameter('bullet_speed').value
         # 发弹判断
         yaw_threshold_deg = self.get_parameter('yaw_threshold_deg').value
@@ -126,6 +131,8 @@ class RmTracker(Node):
         self.tracker.bullet_speed = bullet_speed
         self.tracker.yaw_threshold_deg = yaw_threshold_deg
         self.tracker.pitch_threshold_deg = pitch_threshold_deg
+        self.tracker.min_spinning_frame = min_spinning_frame
+        self.tracker.min_spinning_vel = min_spinning_vel
         self.imu_rpy = None
         self.tf = RmTF()
         self.bridge = CvBridge() # 初始化转换器
@@ -254,29 +261,29 @@ class RmTracker(Node):
             elif name == 'cam_to_gun_pos_x':
                 if self.is_changed(self.tracker.cam_to_gun_pos[0], value):
                     self.tracker.cam_to_gun_pos[0] = value
-                    reset_required = True
+                    reset_required = False
             elif name == 'cam_to_gun_pos_y':
                 if self.is_changed(self.tracker.cam_to_gun_pos[1], value):
                     self.tracker.cam_to_gun_pos[1] = value
-                    reset_required = True
+                    reset_required = False
             elif name == 'cam_to_gun_pos_z':
                 if self.is_changed(self.tracker.cam_to_gun_pos[2], value):
                     self.tracker.cam_to_gun_pos[2] = value
-                    reset_required = True
+                    reset_required = False
 
             # 外参旋转
             elif name == 'cam_to_gun_rpy_r':
                 if self.is_changed(self.tracker.cam_to_gun_rpy[0], value):
                     self.tracker.cam_to_gun_rpy[0] = value
-                    reset_required = True
+                    reset_required = False
             elif name == 'cam_to_gun_rpy_p':
                 if self.is_changed(self.tracker.cam_to_gun_rpy[1], value):
                     self.tracker.cam_to_gun_rpy[1] = value
-                    reset_required = True
+                    reset_required = False
             elif name == 'cam_to_gun_rpy_y':
                 if self.is_changed(self.tracker.cam_to_gun_rpy[2], value):
                     self.tracker.cam_to_gun_rpy[2] = value
-                    reset_required = True
+                    reset_required = False
 
             # -----------------------------------------------------------
             # 3. 滤波器核心参数 (敏感参数，变化必须重置)
@@ -298,7 +305,7 @@ class RmTracker(Node):
                 if self.is_changed(self.tracker.radius_params['r_min'], value):
                     self.tracker.radius_params['r_min'] = value
                     reset_required = True
-
+            
             # EKF 过程噪声 Q
             elif name == 'ekf_QR_q_xyz':
                 if self.is_changed(self.tracker.ekf_QR_params['q_xyz'], value):
@@ -326,8 +333,19 @@ class RmTracker(Node):
             elif name == 'bullet_speed':
                 if self.is_changed(self.tracker.bullet_speed, value):
                     self.tracker.bullet_speed = value
-                    reset_required = True
+                    reset_required = False
 
+            # 小陀螺判断
+            elif name == 'min_spinning_frame':
+                if self.is_changed(self.tracker.min_spinning_frame, value):
+                    self.tracker.min_spinning_frame = value
+                    reset_required = False
+            
+            elif name == 'min_spinning_vel':
+                if self.is_changed(self.tracker.min_spinning_vel, value):
+                    self.tracker.min_spinning_vel = value
+                    reset_required = False
+            
             # 发弹角度判断
             elif name == 'yaw_threshold_deg':
                 if self.is_changed(self.tracker.yaw_threshold_deg, value):
@@ -403,13 +421,13 @@ class RmTracker(Node):
 
             if self.log_throttler.should_log("gimbal_control_info"): # 使用特定的 key
                             self.get_logger().info(f"[rm_tracker]"+
-                                                   f"{self.tracker.c.PINK}FPS{self.tracker.c.RESET}: {self.tracker.c.CYAN}{fps:.2f}{self.tracker.c.RESET}"+
-                                                   f" {target_color_str}"
-                                                   f" {self.tracker.c.PINK}Gimbal control{self.tracker.c.RESET}"+
-                                                   f" - {self.tracker.c.GREEN}pitch:{self.tracker.c.RESET} {self.tracker.c.CYAN}{gimbal_control[1]:.2f}{self.tracker.c.RESET}"+
-                                                   f" || {self.tracker.c.GREEN}yaw:{self.tracker.c.RESET} {self.tracker.c.CYAN}{gimbal_control[0]:.2f}{self.tracker.c.RESET}"+
-                                                   f" || {self.tracker.c.GREEN}fire:{self.tracker.c.RESET} {self.tracker.c.CYAN}{gimbal_control[2]:.0f}{self.tracker.c.RESET}"
-                                                   )
+                                                    f"{self.tracker.c.PINK}FPS{self.tracker.c.RESET}: {self.tracker.c.CYAN}{fps:.2f}{self.tracker.c.RESET}"+
+                                                    f" {target_color_str}"
+                                                    f" {self.tracker.c.PINK}Gimbal control{self.tracker.c.RESET}"+
+                                                    f" - {self.tracker.c.GREEN}pitch:{self.tracker.c.RESET} {self.tracker.c.CYAN}{gimbal_control[1]:.2f}{self.tracker.c.RESET}"+
+                                                    f" || {self.tracker.c.GREEN}yaw:{self.tracker.c.RESET} {self.tracker.c.CYAN}{gimbal_control[0]:.2f}{self.tracker.c.RESET}"+
+                                                    f" || {self.tracker.c.GREEN}fire:{self.tracker.c.RESET} {self.tracker.c.CYAN}{gimbal_control[2]:.0f}{self.tracker.c.RESET}"
+                                                    )
 
     def camera_info_cb(self, msg: CameraInfo):
         # 只需要设置一次即可，避免重复计算

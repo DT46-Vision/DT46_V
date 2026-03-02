@@ -46,9 +46,6 @@ class RMSerialDriver(Node):
         # 创建发布者 2: IMU 数据
         self.pub_uart_receive_imu = self.create_publisher(Vector3Stamped, '/imu/rpy', qos)
 
-        # 创建变量
-        self.tracking_color = 10
-
         self.color = ColorPrint()
 
         # 初始化串口
@@ -74,21 +71,12 @@ class RMSerialDriver(Node):
         self.declare_parameter("flow_control", "none")
         self.declare_parameter("parity", "none")
         self.declare_parameter("stop_bits", "1")
-        # 声明帧头参数及默认值
-        self.declare_parameter("send_header", 0xA5)
-        self.declare_parameter("receive_header", 0x5A)
 
         self.device_name = self.get_parameter("device_name").value
         self.baud_rate = self.get_parameter("baud_rate").value
         self.flow_control = self.get_parameter("flow_control").value
         self.parity = self.get_parameter("parity").value
         self.stop_bits = self.get_parameter("stop_bits").value
-        # 获取帧头参数
-        self.send_header = self.get_parameter("send_header").value
-        self.receive_header = self.get_parameter("receive_header").value
-
-        # 将接收帧头转换为 bytes 类型，供后续比对使用
-        self.receive_header_bytes = bytes([self.receive_header])
 
     def receive_data(self):
         serial_receive_msg = Decision()
@@ -105,7 +93,7 @@ class RMSerialDriver(Node):
             try:
                 # 1. 查找帧头
                 header = self.serial_port.read(1)
-                if not header or header != self.receive_header_bytes:
+                if not header or header != b'\xA5':
                     continue
 
                 # 2. 读取剩余数据 (15字节)
@@ -149,10 +137,7 @@ class RMSerialDriver(Node):
 
                 # 7. 处理 Decision 逻辑
                 serial_receive_msg.header.stamp = self.get_clock().now().to_msg()
-
-                if self.tracking_color != detect_color:
-                    self.tracking_color = detect_color
-                    serial_receive_msg.color = detect_color
+                serial_receive_msg.color = detect_color
 
                 # 发布决策消息 (注意：match 字段已被移除)
                 self.pub_uart_receive_decision.publish(serial_receive_msg)
@@ -162,14 +147,14 @@ class RMSerialDriver(Node):
 
     def send_data(self, msg):
         try:
-            header = self.send_header
+            header = 0x5A
             pitch  = msg.pitch
             yaw    = -msg.yaw
             shoot  = msg.can_fire
             # 1. 打包数据载荷 (10字节)
             # <BffB: Header(1), Pitch(4), Yaw(4), Shoot(1)
             # 这里的顺序必须严格对应
-            data_payload = struct.pack("<Bffi", header, pitch, yaw, shoot)
+            data_payload = struct.pack("<BffB", header, pitch, yaw, shoot)
 
             # 2. 计算 CRC16 校验码
             # 注意：是对前 10 个字节(data_payload) 计算 CRC

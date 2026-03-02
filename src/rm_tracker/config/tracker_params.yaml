@@ -47,6 +47,10 @@ rm_tracker:
     radius_r_max: 0.4              # 车辆最大半径 (m)
     radius_r_min: 0.12              # 车辆最小半径 (m)
 
+    # 反小陀螺
+    max_spinning_frame: 10
+    min_spinning_vel: 2.5
+
     # [发射参数]
     bullet_speed: 28.0            # 弹速 (m/s)
 

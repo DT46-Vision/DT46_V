@@ -42,7 +42,6 @@ class Armor:
         # 之前在字典里乱塞的属性，现在正式给名分
         self.index = index      # 0,1,2,3 (装甲板序号)
         self.angle_diff = 0.0   # 枪口偏离目标的角度
-        self.cost = 0.0         # 选板代价
 
 class Tracker:
     # 状态机枚举
@@ -59,9 +58,9 @@ class Tracker:
         self.cam_to_gun_rpy = np.array([0.0, 0.0, 0.0])     # [外参] 相机相对于枪口的旋转欧拉角 (Roll, Pitch, Yaw)
         self.ekf = ExtendedKalmanFilter()                   # 扩展卡尔曼滤波器 (EKF) 核心实例
         self.last_time = None                               # 上一帧的时间戳，用于计算帧间时间差 dt
-        self.dist_tol = 0.05                                # [预处理] 同一装甲板不同观测点的距离容差 (防止误判)
+        self.dist_tol = 0.15                                # [预处理] 同一装甲板不同观测点的距离容差 (防止误判)
         self.max_match_distance = 0.2                       # [匹配] EKF 预测值与观测值的最大欧氏距离阈值 (m)
-        self.max_match_yaw_diff = 1.0                         # [匹配] 判定装甲板切换 (Armor Jump) 的 Yaw 角度差阈值 (rad)
+        self.max_match_yaw_diff = 1.0                       # [匹配] 判定装甲板切换 (Armor Jump) 的 Yaw 角度差阈值 (rad)
         self.tracking_thres = 5                             # 进入 TRACKING 状态所需的连续检测帧数
         self.lost_thres = 10                                # 进入 LOST 状态所需的连续丢失帧数
         self.tracker_state = self.LOST                      # 跟踪器 FSM 当前状态 (LOST/DETECTING/TRACKING/TEMP_LOST)
@@ -76,7 +75,10 @@ class Tracker:
         self.last_yaw = 0.0                                 # 上一帧的连续化 Yaw 角 (用于处理角度跳变与去卷绕)
         self.dz = 0.0                                       # [几何] 当前板与另一组板的高度差 (z轴偏移)
         self.another_r = 0.26                               # [几何] 另一组装甲板的旋转半径
-        self.min_spinning_speed_tol = 0.05                  # 小陀螺最低门限
+        self.spin = False                                   # [几何] 小陀螺旋转标准位
+        self.min_spinning_frame = 10                        # 小陀螺旋转的最小帧数
+        self.min_spinning_frame_count = 0                   # 小陀螺帧数计数器
+        self.min_spinning_vel = 5.0                          # 小陀螺最低门限
         self.target = None                                  # 最终解算出的目标状态
         self.bullet_speed = 28.0                            # 弹道速度 (m/s)
         self.muzzle_target = None                           # 弹道解算后的目标点
@@ -462,29 +464,65 @@ class Tracker:
         选出最佳目标 (Armor 对象)
         """
         best_armor = None
-        min_cost = float('inf')
+        min_dist = float('inf')
 
         xc, yc = self.target_state[0], self.target_state[2]
         yaw_center_to_cam = math.atan2(-yc, -xc)
 
-        for armor in robot_armors:
-            # 【修改】直接访问属性
-            dist = np.linalg.norm(armor.pos)
-            cost = dist
+        # 小陀螺状态更新
+        if self.spin == False and self.ekf.X[7] > self.min_spinning_vel:  
+            self.min_spinning_frame_count += 1
+            if self.min_spinning_frame_count > self.min_spinning_frame:
+                self.min_spinning_frame_count = 0
+                self.spin = True
+        else:
+            self.min_spinning_frame_count = 0
+            self.spin = False
+        
+        # 小陀螺决策
+        if self.spin:
+            same_side = []
+            best_armor = None
+            for armor in robot_armors:
+                if self.ekf.X[7] > 0:
+                    if armor.yaw > 0:
+                        same_side.append(armor)
+                else:
+                    if armor.yaw < 0:
+                        same_side.append(armor)
+                
+            for armor in same_side:
+                dist = np.linalg.norm(armor.pos)
 
-            # 算出板子相对于车中心的角度
-            yaw_center_to_armor = math.atan2(armor.pos[1] - yc, armor.pos[0] - xc)
+                # 【修正】小陀螺模式也必须计算并写入 angle_diff，否则下游函数会报错
+                yaw_center_to_armor = math.atan2(armor.pos[1] - yc, armor.pos[0] - xc)
+                armor.angle_diff = abs(shortest_angular_distance(yaw_center_to_cam, yaw_center_to_armor))
 
-            # 算出夹角
-            angle_diff = abs(shortest_angular_distance(yaw_center_to_cam, yaw_center_to_armor))
+                if dist < min_dist:
+                    best_armor = armor
+                    min_dist = dist
 
-            # 【修改】直接写入属性，不再是字典赋值
-            armor.angle_diff = angle_diff
-            armor.cost = cost
+        # 非小陀螺决策
+        else:
+            sorted_armors = sorted(robot_armors, key=lambda armor: np.linalg.norm(armor.pos))
+            candidate_armor = sorted_armors[:2] # 候选装甲板
+                
+            for armor in candidate_armor:
+                # 【修改】直接访问属性
+                dist = np.linalg.norm(armor.pos)
 
-            if cost < min_cost:
-                min_cost = cost
-                best_armor = armor
+                # 算出板子相对于车中心的角度
+                yaw_center_to_armor = math.atan2(armor.pos[1] - yc, armor.pos[0] - xc)
+
+                # 算出夹角
+                angle_diff = abs(shortest_angular_distance(yaw_center_to_cam, yaw_center_to_armor))
+
+                # 【修改】直接写入属性，不再是字典赋值
+                armor.angle_diff = angle_diff
+
+                if dist < min_dist:
+                    min_dist = dist
+                    best_armor = armor
 
         self.target = best_armor
 
@@ -844,11 +882,15 @@ class Tracker:
         line_step = 30
         status_color = (0, 255, 0) if self.gimbal_control[2] else (0, 0, 255)
         status_text = "FIRE ENABLE" if self.gimbal_control[2] else "HOLD FIRE"
+        spin_status = "SPIN" if self.spin else "NORMAL"
+        spin_status_color = (0, 255, 0) if spin_status else (0, 0, 255)
 
-        cv2.putText(draw, f"Dist : {dist:.2f} m", (start_x, start_y + line_step * 0), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
-        cv2.putText(draw, f"Pitch: {self.gimbal_control[1]:.2f} deg", (start_x, start_y + line_step * 1), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
-        cv2.putText(draw, f"Yaw  : {self.gimbal_control[0]:.2f} deg", (start_x, start_y + line_step * 2), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
-        cv2.putText(draw, f"Diff : {angle_diff_deg:.1f} deg", (start_x, start_y + line_step * 3), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
-        cv2.putText(draw, f"[{status_text}]", (start_x, start_y + line_step * 4 + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+
+        cv2.putText(draw, f"[{spin_status}]", (start_x, start_y + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.8, spin_status_color, 2)
+        cv2.putText(draw, f"Dist : {dist:.2f} m", (start_x, start_y + line_step * 1), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
+        cv2.putText(draw, f"Pitch: {self.gimbal_control[1]:.2f} deg", (start_x, start_y + line_step * 2), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
+        cv2.putText(draw, f"Yaw  : {self.gimbal_control[0]:.2f} deg", (start_x, start_y + line_step * 3), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
+        cv2.putText(draw, f"Diff : {angle_diff_deg:.1f} deg", (start_x, start_y + line_step * 4), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
+        cv2.putText(draw, f"[{status_text}]", (start_x, start_y + line_step * 5 + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
 
         return draw
