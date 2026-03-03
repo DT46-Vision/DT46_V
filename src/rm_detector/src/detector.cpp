@@ -131,7 +131,12 @@ namespace DT46_VISION{
     void ArmorDetector::update_height_multiplier_max(float new_height_multiplier_max) {
         params.height_multiplier_max = new_height_multiplier_max;
     }
-
+    void ArmorDetector::update_row_stretch(float new_row_stretch) {
+        params.row_stretch = new_row_stretch;
+    }    
+    void ArmorDetector::update_col_stretch(float new_col_stretch) {
+        params.col_stretch = new_col_stretch;
+    }
     void ArmorDetector::update_binary_val(int new_binary_val) {
         binary_val = new_binary_val;
     }
@@ -265,11 +270,11 @@ namespace DT46_VISION{
     NumberClassifier::Result ArmorDetector::get_armor_result(const Light& light1, const Light& light2) {
         NumberClassifier::Result res;
 
-        auto l1 = stretch_point(light1.up, light1.down, 2.22f);
-        auto l2 = stretch_point(light2.up, light2.down, 2.22f);
+        auto l1 = stretch_point(light1.up, light1.down, params.row_stretch);
+        auto l2 = stretch_point(light2.up, light2.down, params.row_stretch);
 
-        auto armor_down = stretch_point(l1.second, l2.second, 0.66f);
-        auto armor_up = stretch_point(l1.first, l2.first, 0.66f);
+        auto armor_down = stretch_point(l1.second, l2.second, params.col_stretch);
+        auto armor_up = stretch_point(l1.first, l2.first, params.col_stretch);
 
         cv::Point2f src_armor_pts[4] = {
             armor_up.first,     // left-up

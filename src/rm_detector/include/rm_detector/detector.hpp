@@ -60,6 +60,8 @@ namespace DT46_VISION {
         double height_rate_tol;
         double height_multiplier_min;
         double height_multiplier_max;
+        double row_stretch;
+        double col_stretch;
         bool roi_crop;
         double roi_scale;
     };
@@ -107,6 +109,8 @@ namespace DT46_VISION {
         void update_height_rate_tol(float new_height_rate_tol);
         void update_height_multiplier_min(float new_height_multiplier_min);
         void update_height_multiplier_max(float new_height_multiplier_max);
+        void update_row_stretch(float new_row_stretch);
+        void update_col_stretch(float new_col_stretch);
 
         void update_binary_val(int new_binary_val);
         void update_detect_color(int new_color);
