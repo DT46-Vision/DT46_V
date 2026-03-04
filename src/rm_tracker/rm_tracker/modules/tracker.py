@@ -77,7 +77,9 @@ class Tracker:
         self.another_r = 0.26                               # [几何] 另一组装甲板的旋转半径
         self.spin = False                                   # [几何] 小陀螺旋转标准位
         self.min_spinning_frame = 10                        # 小陀螺旋转的最小帧数
+        self.spinning_frame_lost = 5                        # 小陀螺帧数丢失阈值
         self.min_spinning_frame_count = 0                   # 小陀螺帧数计数器
+        self.spinning_frame_lost_count = 0                  # 小陀螺帧数丢失计数器
         self.min_spinning_vel = 5.0                          # 小陀螺最低门限
         self.target = None                                  # 最终解算出的目标状态
         self.bullet_speed = 28.0                            # 弹道速度 (m/s)
@@ -469,20 +471,25 @@ class Tracker:
         xc, yc = self.target_state[0], self.target_state[2]
         yaw_center_to_cam = math.atan2(-yc, -xc)
 
-        # 小陀螺状态更新
-        if self.spin == False and abs(self.ekf.X[7]) > self.min_spinning_vel:  
+        # ---------------- 状态更新：引入退出防抖 ----------------
+        if abs(self.ekf.X[7]) > self.min_spinning_vel:
             self.min_spinning_frame_count += 1
+            self.spinning_frame_lost_count = 0  # 角速度达标，清空丢失计数
             if self.min_spinning_frame_count > self.min_spinning_frame:
                 self.min_spinning_frame_count = 0
                 self.spin = True
-        elif abs(self.ekf.X[7]) < self.min_spinning_vel:
-            self.min_spinning_frame_count = 0
-            self.spin = False
-        
-        # 小陀螺决策
+        else:
+            self.min_spinning_frame_count = 0  # 角速度未达标，清空进入计数
+            if self.spin:  # 如果当前在小陀螺状态，开始累计丢失帧
+                self.spinning_frame_lost_count += 1
+                if self.spinning_frame_lost_count > self.spinning_frame_lost:
+                    self.spin = False
+                    self.spinning_frame_lost_count = 0
+
+        # ---------------- 选板决策 ----------------
         if self.spin:
+            # 小陀螺模式：“打半边”策略
             same_side = []
-            best_armor = None
             for armor in robot_armors:
                 if self.ekf.X[7] > 0:
                     if armor.yaw > 0:
@@ -490,11 +497,9 @@ class Tracker:
                 else:
                     if armor.yaw < 0:
                         same_side.append(armor)
-                
+
             for armor in same_side:
                 dist = np.linalg.norm(armor.pos)
-
-                # 【修正】小陀螺模式也必须计算并写入 angle_diff，否则下游函数会报错
                 yaw_center_to_armor = math.atan2(armor.pos[1] - yc, armor.pos[0] - xc)
                 armor.angle_diff = abs(shortest_angular_distance(yaw_center_to_cam, yaw_center_to_armor))
 
@@ -502,26 +507,21 @@ class Tracker:
                     best_armor = armor
                     min_dist = dist
 
-        # 非小陀螺决策
         else:
+            # 非小陀螺模式：候选前二，选夹角最小（最正对）
             sorted_armors = sorted(robot_armors, key=lambda armor: np.linalg.norm(armor.pos))
-            candidate_armor = sorted_armors[:2] # 候选装甲板
-                
-            for armor in candidate_armor:
-                # 【修改】直接访问属性
-                dist = np.linalg.norm(armor.pos)
+            candidate_armors = sorted_armors[:2] # 候选前两块装甲板
 
-                # 算出板子相对于车中心的角度
+            min_angle_diff = float('inf') # 用于筛选最正对的板子
+
+            for armor in candidate_armors:
                 yaw_center_to_armor = math.atan2(armor.pos[1] - yc, armor.pos[0] - xc)
-
-                # 算出夹角
                 angle_diff = abs(shortest_angular_distance(yaw_center_to_cam, yaw_center_to_armor))
-
-                # 【修改】直接写入属性，不再是字典赋值
                 armor.angle_diff = angle_diff
 
-                if dist < min_dist:
-                    min_dist = dist
+                # 比较角度差，越小越正对
+                if angle_diff < min_angle_diff:
+                    min_angle_diff = angle_diff
                     best_armor = armor
 
         self.target = best_armor

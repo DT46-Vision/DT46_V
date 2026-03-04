@@ -54,6 +54,7 @@ class RmTracker(Node):
         self.declare_parameter('radius_r_max', 0.4)             # 旋转半径参数 - r_max
         self.declare_parameter('radius_r_min', 0.12)            # 旋转半径参数 - r_min
         self.declare_parameter('min_spinning_frame', 10)        # 小陀螺门限
+        self.declare_parameter('spinning_frame_lost', 5)        # 小陀螺丢失帧数门限
         self.declare_parameter('min_spinning_vel', 2.5)         # 旋转速度
         self.declare_parameter('bullet_speed', 28.0)            # 子弹速度
         self.declare_parameter('yaw_threshold_deg', 5.0)        # 允许发射的 yaw 角度阈值
@@ -110,6 +111,7 @@ class RmTracker(Node):
         }
         # 反小陀螺参数
         min_spinning_frame = self.get_parameter('min_spinning_frame').value
+        spinning_frame_lost = self.get_parameter('spinning_frame_lost').value
         min_spinning_vel = self.get_parameter('min_spinning_vel').value
         bullet_speed = self.get_parameter('bullet_speed').value
         # 发弹判断
@@ -132,6 +134,7 @@ class RmTracker(Node):
         self.tracker.yaw_threshold_deg = yaw_threshold_deg
         self.tracker.pitch_threshold_deg = pitch_threshold_deg
         self.tracker.min_spinning_frame = min_spinning_frame
+        self.tracker.spinning_frame_lost = spinning_frame_lost
         self.tracker.min_spinning_vel = min_spinning_vel
         self.imu_rpy = None
         self.tf = RmTF()
@@ -339,6 +342,11 @@ class RmTracker(Node):
             elif name == 'min_spinning_frame':
                 if self.is_changed(self.tracker.min_spinning_frame, value):
                     self.tracker.min_spinning_frame = value
+                    reset_required = False
+
+            elif name == 'spinning_frame_lost':
+                if self.is_changed(self.tracker.spinning_frame_lost, value):
+                    self.tracker.spinning_frame_lost = value
                     reset_required = False
 
             elif name == 'min_spinning_vel':

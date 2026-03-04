@@ -49,6 +49,7 @@ rm_tracker:
 
     # 反小陀螺
     max_spinning_frame: 10
+    spinning_frame_lost: 5
     min_spinning_vel: 2.5
 
     # [发射参数]
