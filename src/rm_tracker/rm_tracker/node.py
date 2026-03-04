@@ -29,8 +29,8 @@ class RmTracker(Node):
         self.declare_parameter('rotation_rpy_p', 0.0)           # 陀螺仪到相机姿态变换 -> p
         self.declare_parameter('rotation_rpy_y', -180.0)        # 陀螺仪到相机姿态变换 -> y
         self.declare_parameter('show_rpy', False)               # 陀螺仪调试 - 显示原始数据和调整后的数据
-        self.declare_parameter('debug_info', False)
-        self.declare_parameter('display_res', False)            # 显示处理结果
+        self.declare_parameter('debug', False)
+        self.declare_parameter('display', False)            # 显示处理结果
         # -----------------------TRACKER---------------------
         self.declare_parameter('target_color', 0)               # 目标敌方阵营 (0: RED, 1: BLUE)
         self.declare_parameter('cam_to_gun_pos_x', 0.0)         # [外参] 相机相对于枪口的平移向量 -> x (x:右, y:下, z:前)
@@ -65,9 +65,9 @@ class RmTracker(Node):
         rotation_p = self.get_parameter('rotation_rpy_p').value
         rotation_y = self.get_parameter('rotation_rpy_y').value
         self.rotation_rpy = np.array([rotation_r, rotation_p, rotation_y])
-        self.debug_info = self.get_parameter('debug_info').value
+        self.debug = self.get_parameter('debug').value
         self.show_rpy = self.get_parameter('show_rpy').value            # 陀螺仪调试
-        self.display_res = self.get_parameter('display_res').value      # 显示处理结果
+        self.display = self.get_parameter('display').value      # 显示处理结果
         # -----------------------TRACKER---------------------
         target_color = self.get_parameter('target_color').value    # 目标敌方阵营
         # [外参] 相机相对于枪口的平移向量
@@ -215,10 +215,10 @@ class RmTracker(Node):
                 self.log_throttler._default_ms = int(value)
             elif name == 'show_rpy':
                 self.show_rpy = value
-            elif name == 'debug_info':
-                self.debug_info = value
-            elif name == 'display_res':
-                self.display_res = value
+            elif name == 'debug':
+                self.debug = value
+            elif name == 'display':
+                self.display = value
 
             # IMU 修正参数 (仅更新数组)
             elif name == 'rotation_rpy_r':
@@ -305,7 +305,7 @@ class RmTracker(Node):
                 if self.is_changed(self.tracker.radius_params['r_min'], value):
                     self.tracker.radius_params['r_min'] = value
                     reset_required = True
-            
+
             # EKF 过程噪声 Q
             elif name == 'ekf_QR_q_xyz':
                 if self.is_changed(self.tracker.ekf_QR_params['q_xyz'], value):
@@ -340,12 +340,12 @@ class RmTracker(Node):
                 if self.is_changed(self.tracker.min_spinning_frame, value):
                     self.tracker.min_spinning_frame = value
                     reset_required = False
-            
+
             elif name == 'min_spinning_vel':
                 if self.is_changed(self.tracker.min_spinning_vel, value):
                     self.tracker.min_spinning_vel = value
                     reset_required = False
-            
+
             # 发弹角度判断
             elif name == 'yaw_threshold_deg':
                 if self.is_changed(self.tracker.yaw_threshold_deg, value):
@@ -399,7 +399,7 @@ class RmTracker(Node):
             GB.can_fire = int(gimbal_control[2])
             self.pub_gimbal_control.publish(GB)
 
-            if self.debug_info:
+            if self.debug:
                 for log_type, log_msg in logs:
                     # 策略 1: 状态切换、初始化、警告 -> 直接打印 (因为频率低且重要)
                     if log_type in ["sys", "state", "warn", "jump"]:
@@ -446,7 +446,7 @@ class RmTracker(Node):
 
     def res_img_cb(self, msg: Image):
         # 1. 性能开关：如果没开启显示，直接不处理图像，节省 CPU
-        if not self.display_res:
+        if not self.display:
             return
 
         try:
@@ -458,20 +458,23 @@ class RmTracker(Node):
             # 必须保证有 IMU 数据（用于坐标回转）和 相机内参（用于投影）
             if self.imu_rpy is not None and self.tf.has_camera_info:
                 # 调用 tracker 的绘图函数
-                estimate_img = self.tracker.draw_estimate(self.tf, cv_img, self.imu_rpy)
-                yaw_debug_img = self.tracker.draw_observation_yaw(self.tf, cv_img, self.imu_rpy)
+                if self.debug:
+                    estimate_img = self.tracker.draw_estimate(self.tf, cv_img, self.imu_rpy)
+                    yaw_debug_img = self.tracker.draw_observation_yaw(self.tf, cv_img, self.imu_rpy)
+
                 ballistic_img = self.tracker.draw_ballistic(self.tf, cv_img, self.imu_rpy)
             else:
                 return None
 
             # 5. OpenCV -> ROS Image 并发布
-            out_msg = self.bridge.cv2_to_imgmsg(estimate_img, "bgr8")
-            out_msg.header = msg.header # 保持原始的时间戳和坐标系
-            self.pub_estimate_img.publish(out_msg)
+            if self.debug:
+                out_msg = self.bridge.cv2_to_imgmsg(estimate_img, "bgr8")
+                out_msg.header = msg.header # 保持原始的时间戳和坐标系
+                self.pub_estimate_img.publish(out_msg)
 
-            out_msg = self.bridge.cv2_to_imgmsg(yaw_debug_img, "bgr8")
-            out_msg.header = msg.header
-            self.pub_yaw_debug_img.publish(out_msg)
+                out_msg = self.bridge.cv2_to_imgmsg(yaw_debug_img, "bgr8")
+                out_msg.header = msg.header
+                self.pub_yaw_debug_img.publish(out_msg)
 
             out_msg = self.bridge.cv2_to_imgmsg(ballistic_img, "bgr8")
             out_msg.header = msg.header
