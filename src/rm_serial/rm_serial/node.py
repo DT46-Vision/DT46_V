@@ -81,67 +81,63 @@ class RMSerialDriver(Node):
     def receive_data(self):
         serial_receive_msg = Decision()
         serial_receive_msg.header.frame_id = 'serial_receive_frame'
-        serial_receive_msg.color = 10
-
-        # [确认配置]
         # 总长 16 = Header(1)+Color(1)+Roll(4)+Pitch(4)+Yaw(4) + CRC(2)
         packet_length = 16
+
+        # 建立本地内存缓冲区
+        buffer = bytearray()
 
         self.get_logger().info("接收数据线程已启动 (CRC16 Mode - 16 Bytes)")
 
         while rclpy.ok():
             try:
-                # 1. 查找帧头
-                header = self.serial_port.read(1)
-                if not header or header != b'\xA5':
+                # 1. 一次性读取底层积压的所有字节
+                waiting = self.serial_port.in_waiting
+                if waiting > 0:
+                    buffer.extend(self.serial_port.read(waiting))
+                else:
+                    # 避免 CPU 空转
+                    time.sleep(0.001)
                     continue
 
-                # 2. 读取剩余数据 (15字节)
-                remaining_data = self.serial_port.read(packet_length - 1)
-                if len(remaining_data) != packet_length - 1:
-                    self.get_logger().warn("数据包不完整")
-                    continue
+                # 2. 在内存中循环处理所有完整的包
+                while len(buffer) >= packet_length:
+                    # 寻找帧头 0xA5 (即十进制 165)
+                    if buffer[0] == 0xA5:
+                        # 提取一个完整包
+                        full_packet = bytes(buffer[:packet_length])
 
-                # 3. 组合完整包
-                full_packet = header + remaining_data
+                        data_payload = full_packet[:-2]
+                        checksum_bytes = full_packet[-2:]
+                        received_crc = struct.unpack('<H', checksum_bytes)[0]
+                        calculated_crc = get_crc16_check_sum(data_payload)
 
-                # 4. CRC16 校验逻辑
-                # 数据载荷：前14字节 (Header ~ Yaw)
-                data_payload = full_packet[:-2]
-                # 校验位：最后2字节
-                checksum_bytes = full_packet[-2:]
+                        if calculated_crc == received_crc:
+                            # 校验通过，解包
+                            _, detect_color, roll, pitch, yaw = struct.unpack("<BBfff", data_payload)
 
-                # 解析收到的校验值 (小端序 unsigned short)
-                received_crc = struct.unpack('<H', checksum_bytes)[0]
+                            rpy_msg = Vector3Stamped()
+                            rpy_msg.header.stamp = self.get_clock().now().to_msg()
+                            rpy_msg.header.frame_id = 'imu_link'
+                            rpy_msg.vector.x = float(roll)
+                            rpy_msg.vector.y = float(-pitch)
+                            rpy_msg.vector.z = float(yaw)
+                            self.pub_uart_receive_imu.publish(rpy_msg)
 
-                # 计算本地数据的 CRC16
-                # 注意：确保 get_crc16_check_sum 算法与下位机一致 (通常是 CRC-CCITT)
-                calculated_crc = get_crc16_check_sum(data_payload)
+                            serial_receive_msg.header.stamp = self.get_clock().now().to_msg()
+                            serial_receive_msg.color = detect_color
+                            self.pub_uart_receive_decision.publish(serial_receive_msg)
 
-                if calculated_crc != received_crc:
-                    continue
+                            # 从缓冲区移除已处理的合法包
+                            del buffer[:packet_length]
+                        else:
+                            # 校验失败：说明这个 0xA5 可能是数据段里的伪造帧头，只丢弃一个字节，继续往后找
+                            del buffer[:1]
+                    else:
+                        # 帧头不对，丢弃首字节，继续向后滑动
+                        del buffer[:1]
 
-                # 5. 数据解包 (14字节)
-                # <BBfff: Header(1), Color(1), Roll(4), Pitch(4), Yaw(4)
-                _, detect_color, roll, pitch, yaw = struct.unpack("<BBfff", data_payload)
-
-                # 6. 发布 IMU 消息
-                rpy_msg = Vector3Stamped()
-                rpy_msg.header.stamp = self.get_clock().now().to_msg()
-                rpy_msg.header.frame_id = 'imu_link'
-                rpy_msg.vector.x = float(roll)
-                rpy_msg.vector.y = float(-pitch)
-                rpy_msg.vector.z = float(yaw)
-
-                self.pub_uart_receive_imu.publish(rpy_msg)
-
-                # 7. 处理 Decision 逻辑
-                serial_receive_msg.header.stamp = self.get_clock().now().to_msg()
-                serial_receive_msg.color = detect_color
-
-                # 发布决策消息 (注意：match 字段已被移除)
-                self.pub_uart_receive_decision.publish(serial_receive_msg)
-            except (serial.SerialException, struct.error, ValueError) as e:
+            except (serial.SerialException, struct.error, ValueError, OSError) as e:
                 self.get_logger().error(f"接收数据异常: {str(e)}")
                 self.reopen_port()
 

@@ -173,7 +173,7 @@ class Tracker:
 
             world_yaw_deg = gimbal_yaw_deg + pnp_yaw_deg # Yaw 角处理：叠加 IMU -> 世界系 Yaw = 云台 Yaw + 相对 Yaw
 
-            yaw_rad = math.radians(world_yaw_deg) # 转弧度并归一化(滤波器需要弧度制)
+            yaw_rad = world_yaw_deg * DEG2RAD # 转弧度并归一化(滤波器需要弧度制)
             raw_yaw = normalize_angle(yaw_rad)    # 弧度制归一化 -180 ~ 180
 
             armors.append(Armor(aid, world_pos[0], world_pos[1], world_pos[2], raw_yaw))
@@ -360,7 +360,7 @@ class Tracker:
                         self.tracked_armor = armor # 记录最佳匹配
 
             # 匹配逻辑判断
-            if min_position_diff < self.max_match_distance and yaw_diff < math.radians(self.max_match_yaw_diff):
+            if min_position_diff < self.max_match_distance and yaw_diff < self.max_match_yaw_diff * DEG2RAD:
                 # [情况 A]: 完美匹配
                 matched = True
 
@@ -378,7 +378,7 @@ class Tracker:
 
                 self.target_state = self.ekf.update(measurement)
 
-            elif same_id_count == 1 and yaw_diff > math.radians(self.max_match_yaw_diff): # 判定为：车转过去了，这是新的一块板子
+            elif same_id_count == 1 and yaw_diff > self.max_match_yaw_diff * DEG2RAD: # 判定为：车转过去了，这是新的一块板子
 
                 self.handle_armor_jump(same_id_armor)
                 matched = True # Jump 之后认为匹配成功，但不需要再次 update EKF（因为 handle 里已经重置了）
@@ -616,15 +616,15 @@ class Tracker:
 
         # 5. 加上【机械补偿】 (cam_to_gun_rpy)
         # 这一步不能少，用于修正枪管和相机的固有偏差
-        offset_pitch_rad = math.radians(cam_to_gun_rpy[1])
-        offset_yaw_rad   = math.radians(cam_to_gun_rpy[2])
+        offset_pitch_rad = cam_to_gun_rpy[1] * DEG2RAD
+        offset_yaw_rad   = cam_to_gun_rpy[2] * DEG2RAD
 
         final_target_pitch = target_pitch_rad + offset_pitch_rad
         final_target_yaw   = target_yaw_rad + offset_yaw_rad
 
         # 6. 计算电控控制增量 (Delta)
-        current_pitch_rad = math.radians(imu_rpy[1])
-        current_yaw_rad   = math.radians(imu_rpy[2])
+        current_pitch_rad = imu_rpy[1] * DEG2RAD
+        current_yaw_rad   = imu_rpy[2] * DEG2RAD
 
         # 【Yaw】 使用最短路径差值
         delta_yaw = shortest_angular_distance(current_yaw_rad, final_target_yaw)
@@ -636,7 +636,7 @@ class Tracker:
         return [delta_yaw, delta_pitch, True]
 
     def gimbal_to_deg(self, gimbal_control):
-        return [math.degrees(gimbal_control[0]), math.degrees(gimbal_control[1]), False]
+        return [gimbal_control[0] * RAD2DEG, gimbal_control[1] * RAD2DEG, False]
 
     def can_fire(self, gimbal_control):
         """
@@ -876,7 +876,7 @@ class Tracker:
 
         # 3. 绘制【信息面板】
         dist = np.linalg.norm(tgt_pos_world)
-        angle_diff_deg = math.degrees(self.target.angle_diff)
+        angle_diff_deg = self.target.angle_diff * RAD2DEG
 
         start_x, start_y = 20, 50
         line_step = 30

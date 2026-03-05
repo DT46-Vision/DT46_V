@@ -1,4 +1,27 @@
 import numpy as np
+from numba import njit
+
+@njit(fastmath=True)
+def _fast_ekf_predict(X, P, F, Q):
+    # 将复杂的矩阵运算挪到这里，Numba 会将其编译为机器码
+    X_new = F @ X
+    P_new = F @ P @ F.T + Q
+    return X_new, P_new
+
+@njit(fastmath=True)
+def _fast_ekf_update(X, P, H, R, Y, I):
+    # 计算卡尔曼增益 K
+    S = H @ P @ H.T + R
+    K = np.linalg.solve(S.T, (P @ H.T).T).T
+
+    # 更新状态 X
+    X_new = X + K @ Y
+
+    # Joseph form 更新 P (保证正定性)
+    I_KH = I - K @ H
+    P_new = I_KH @ P @ I_KH.T + K @ R @ K.T
+
+    return X_new, P_new
 
 class ExtendedKalmanFilter:
     def __init__(self):
@@ -43,6 +66,14 @@ class ExtendedKalmanFilter:
         self.idx_pos_vel = [0, 2, 4, 6] # x, y, z, yaw 的索引
         self.dt = 0.0
 
+        # ==========================================================
+        # 【Numba 预热】在初始化时空跑一次，触发 JIT 编译，防止实战第一帧卡顿
+        # ==========================================================
+        dummy_Y = np.zeros(4)
+        _fast_ekf_predict(self.X, self.P, self.F, self.Q)
+        _fast_ekf_update(self.X, self.P, self.H, self.R, dummy_Y, self.I)
+
+
     def init_QR(self, q_xyz=20.0, q_yaw=100.0, q_r=800.0, r_xyz_factor=0.05, r_yaw=0.02):
         self.s2qxyz = q_xyz
         self.s2qyaw = q_yaw
@@ -54,16 +85,12 @@ class ExtendedKalmanFilter:
         xc = xa + r0 * np.cos(yaw)
         yc = ya + r0 * np.sin(yaw)
 
-        self.X = np.array([
-            xc, 0,    # x, vx
-            yc, 0,    # y, vy
-            za, 0,    # z, vz
-            yaw, 0,   # yaw, v_yaw
-            r0        # r
-        ])
+        # 使用 [:] 原位赋值，不改变内存地址
+        self.X[:] = [xc, 0.0, yc, 0.0, za, 0.0, yaw, 0.0, r0]
 
-        # 重置协方差
-        self.P = np.eye(9)
+        # 同样原位重置 P
+        self.P.fill(0.0)
+        np.fill_diagonal(self.P, 1.0)
 
     def predict(self, dt):
         """
@@ -112,8 +139,7 @@ class ExtendedKalmanFilter:
         # 3. 执行预测
         # 注意：这里矩阵乘法 @ 仍然会产生临时的中间大矩阵，
         # 但相比反复 malloc Q和F，性能开销已经大幅降低。
-        self.X = self.F @ self.X
-        self.P = self.F @ self.P @ self.F.T + self.Q
+        self.X, self.P = _fast_ekf_predict(self.X, self.P, self.F, self.Q)
 
         return self.X
 
@@ -177,28 +203,7 @@ class ExtendedKalmanFilter:
         # 4. 计算残差 Y
         Y = Z - Z_pred
 
-        # 5. 标准卡尔曼更新
-        # S = H P H^T + R
-        S = self.H @ self.P @ self.H.T + self.R
-
-        try:
-            # 使用 solve 代替 inv，数值上更稳定且通常更快
-            # K = P H^T S^-1
-            # 等价于 K = (S^-1 H P)^T ... 写法较多，这里保持原逻辑
-            # K = self.P @ self.H.T @ np.linalg.inv(S)
-
-            # 使用 lstsq 或者 solve
-            # K = (np.linalg.solve(S.T, (self.P @ self.H.T).T)).T
-            # 为了保持代码简单且不出错，这里还是用 inv，但在嵌入式上 solve 更优
-            K = self.P @ self.H.T @ np.linalg.inv(S)
-        except np.linalg.LinAlgError:
-            K = np.zeros((9, 4))
-
-        self.X = self.X + K @ Y
-
-        # Joseph form 更新 P (数值稳定性)
-        # P = (I - K H) P (I - K H)^T + K R K^T
-        I_KH = self.I - K @ self.H
-        self.P = I_KH @ self.P @ I_KH.T + K @ self.R @ K.T
+        # 5. 标准卡尔曼更新 (调用 Numba 加速函数)
+        self.X, self.P = _fast_ekf_update(self.X, self.P, self.H, self.R, Y, self.I)
 
         return self.X
