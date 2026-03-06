@@ -301,41 +301,45 @@ class Tracker:
 
     def handle_armor_jump(self, current_armor):
         """
-        【难点】处理装甲板跳变 (Switching Armor)
-        当检测到同 ID 装甲板，但 Yaw 角发生巨大突变时触发
+        处理装甲板跳变 (Switching Armor)
         """
+        yaw = self.orientation_to_yaw(current_armor.yaw)
+        self.target_state[6] = yaw
 
-        yaw = self.orientation_to_yaw(current_armor.yaw) # 把角度差加上去，这样角度就正常了且连续了
-        self.target_state[6] = yaw                       # 强制更新 Yaw (重置连续角度逻辑)
-
-        self.dz = self.target_state[4] - current_armor.pos[2]        # 更新 dz: 旧板预测高度 - 新板观测高度 (假设车平动 z 轴不变，z 的突变完全是 dz 引起的)
-        self.target_state[4] = current_armor.pos[2] # 强制把 EKF 的高度拉到新板子上
+        self.dz = self.target_state[4] - current_armor.pos[2]
+        self.target_state[4] = current_armor.pos[2]
 
         # 交换半径
         temp_r = self.target_state[8]
         self.target_state[8] = self.another_r
         self.another_r = temp_r
-        # 【修改】 print -> _log
+
         self._log("jump", f"{self.c.RED}[Tracker] Armor Jump! Swap radius: {self.c.BLUE}{self.another_r:.3f} {self.c.PINK}-> {self.c.CYAN}{self.target_state[8]:.3f}, dz: {self.dz:.3f}{self.c.RESET}")
 
-        # EKF 安全检查
-        current_p = current_armor.pos        # 推算新的车中心
+        current_p = current_armor.pos
         infer_p = self.get_armor_position_from_state(self.target_state)
 
-        if np.linalg.norm(current_p - infer_p) > self.max_match_distance: # 如果跳变后位置偏差过大，说明 EKF 已经发散了，需要重置车中心位置
+        # 修正中心位置，但【保留现有的速度状态】
+        if np.linalg.norm(current_p - infer_p) > self.max_match_distance:
             r = self.target_state[8]
-            self.target_state[0] = current_p[0] + r * np.cos(yaw) # xc
-            self.target_state[1] = 0                              # v_xc
-            self.target_state[2] = current_p[1] + r * np.sin(yaw) # yc
-            self.target_state[3] = 0                              # v_yc
-            self.target_state[4] = current_p[2]                   # za
-            self.target_state[5] = 0                              # v_za
-            # 【修改】 print -> _log
-            self._log("warn", f"[Tracker] {self.c.RED}Jump Error too large, Reset State!{self.c.RESET}")
+            self.target_state[0] = current_p[0] + r * np.cos(yaw) # 修正 xc
+            # 删除了 v_xc = 0，保留原有速度 self.target_state[1]
+            self.target_state[2] = current_p[1] + r * np.sin(yaw) # 修正 yc
+            # 删除了 v_yc = 0，保留原有速度 self.target_state[3]
+            self.target_state[4] = current_p[2]                   # 修正 za
+            # 删除了 v_za = 0，保留原有速度 self.target_state[5]
 
-        # 将修改后的状态写回 EKF
+            self._log("warn", f"[Tracker] {self.c.RED}Jump Error too large, Adjusted Center Position!{self.c.RESET}")
+
         self.ekf.X = self.target_state
-        self.ekf.P = np.eye(9) # 重置协方差，防止跳变瞬间的方差爆炸影响收敛
+
+        # 【核心修改】软重置协方差，而不是使用 np.eye(9)
+        # 适度放大位置和角度的方差，让滤波器在跳变后几帧稍微更信任观测，
+        # 但绝不动速度和半径的方差，防止它们乱飘
+        self.ekf.P[0, 0] += 0.05  # xc 的方差轻微放大
+        self.ekf.P[2, 2] += 0.05  # yc 的方差轻微放大
+        self.ekf.P[4, 4] += 0.05  # za 的方差轻微放大
+        self.ekf.P[6, 6] += 0.2   # yaw 角度的方差适度放大
 
     def update(self, armors, dt):
         """
@@ -418,6 +422,12 @@ class Tracker:
         elif self.target_state[8] > self.radius_params['r_max']:
             self.target_state[8] = self.radius_params['r_max']
             self.ekf.X[8] = self.radius_params['r_max']
+        # [新增] 清洗异常数值并钳制物理速度 (假设最大车速不超过 15 m/s)
+        self.target_state = np.nan_to_num(self.target_state, nan=0.0, posinf=100.0, neginf=-100.0)
+        self.target_state[1] = np.clip(self.target_state[1], -15.0, 15.0)  # v_xc
+        self.target_state[3] = np.clip(self.target_state[3], -15.0, 15.0)  # v_yc
+        self.target_state[5] = np.clip(self.target_state[5], -15.0, 15.0)  # v_za
+        self.ekf.X = self.target_state
 
         # 3. 状态机流转 (State Machine)
         self.tick_state_machine.tick()
@@ -601,6 +611,10 @@ class Tracker:
         # 1. 提取坐标
         x, y, z = muzzle_target.pos
         dist_h = math.sqrt(x**2 + y**2) # 水平距离
+
+        # 增加防爆护盾：距离太近、超过 25 米、或是 NaN 时直接放弃解算
+        if dist_h < 0.1 or dist_h > 12.0 or math.isnan(dist_h):
+            return [0.0, 0.0, False]
 
         if dist_h < 0.1:
             return [0.0, 0.0, False]

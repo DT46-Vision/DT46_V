@@ -133,8 +133,8 @@ class ExtendedKalmanFilter:
         self.Q[6,6] = q_yaw_x; self.Q[6,7] = q_yaw_vx
         self.Q[7,6] = q_yaw_vx; self.Q[7,7] = q_yaw_vv
 
-        # Radius 的噪声
-        self.Q[8,8] = t4 / 4 * self.s2qr
+        # 改为 t2 (dt的平方) 或直接使用 dt，让半径具备适应跳变的灵活性
+        self.Q[8,8] = t2 * self.s2qr
 
         # 3. 执行预测
         # 注意：这里矩阵乘法 @ 仍然会产生临时的中间大矩阵，
@@ -182,9 +182,10 @@ class ExtendedKalmanFilter:
 
         obs_x, obs_y, obs_z = Z[0], Z[1], Z[2]
 
-        self.R[0,0] = abs(self.r_xyz_factor * obs_x)
-        self.R[1,1] = abs(self.r_xyz_factor * obs_y)
-        self.R[2,2] = abs(self.r_xyz_factor * obs_z)
+        base_noise = 0.05  # 设置一个保底噪声
+        self.R[0,0] = abs(self.r_xyz_factor * obs_x) + base_noise
+        self.R[1,1] = abs(self.r_xyz_factor * obs_y) + base_noise
+        self.R[2,2] = abs(self.r_xyz_factor * obs_z) + base_noise
         self.R[3,3] = self.r_yaw
 
         # 3. 计算预计观测值 h(x)
