@@ -17,7 +17,6 @@ from .modules.rm_tf_tools import RmTF                            # 坐标系变�
 from .modules.tracker import Tracker                             # 追踪器
 
 from rcl_interfaces.msg import SetParametersResult               # 参数回调
-from looptick import LoopTick                                    # 引入耗时测量工具
 
 class RmTracker(Node):
     def __init__(self):
@@ -202,9 +201,6 @@ class RmTracker(Node):
             10
         )
 
-        # 初始化 looptick 实例
-        self.imu_rpy_ = LoopTick()
-
     def is_changed(self, old_val, new_val, tol=1e-5):
         return abs(float(old_val) - float(new_val)) > tol
 
@@ -380,7 +376,6 @@ class RmTracker(Node):
         return SetParametersResult(successful=True)
 
     def imu_rpy_cb(self, msg: Vector3Stamped):# 记录图像处理回调的运行状态
-        self.imu_rpy_.tick()
         raw_rpy = [msg.vector.x, msg.vector.y, msg.vector.z]
 
         imu_rpy = self.tf.rotate_pose_axis(raw_rpy, self.rotation_rpy)
@@ -521,8 +516,6 @@ def main(args=None):
     node = RmTracker()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
     finally:
         node.destroy_node()
         rclpy.shutdown()
