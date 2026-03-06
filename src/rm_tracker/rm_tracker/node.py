@@ -70,8 +70,8 @@ class RmTracker(Node):
         rotation_p = self.get_parameter('rotation_rpy_p').value
         rotation_y = self.get_parameter('rotation_rpy_y').value
         self.rotation_rpy = np.array([rotation_r, rotation_p, rotation_y])
-        self.debug = self.get_parameter('debug').value
-        self.show_rpy = self.get_parameter('show_rpy').value            # 陀螺仪调试
+        self.show_rpy = self.get_parameter('show_rpy').value  
+        self.debug = self.get_parameter('debug').value          # 陀螺仪调试
         self.display = self.get_parameter('display').value      # 显示处理结果
         # -----------------------TRACKER---------------------
         target_color = self.get_parameter('target_color').value    # 目标敌方阵营
@@ -124,22 +124,22 @@ class RmTracker(Node):
         # ----------------------初始化对象----------------------
         self.log_throttler = LogThrottler(self, log_throttle_ms)        # 1. 初始化 LogThrottler
         self.tracker = Tracker()                                        # 2. 初始化 Tracker   
-        self.tracker.target_color = target_color
-        self.tracker.ekf_QR_params = QR_params
-        self.tracker.radius_params = radius_params
-        self.tracker.max_match_distance = max_match_distance
-        self.tracker.max_match_yaw_diff = max_match_yaw_diff
-        self.tracker.dist_tol = dist_tol
-        self.tracker.tracking_thres = int(tracking_thres)
-        self.tracker.lost_thres = int(lost_thres)
+        self.tracker.target_color = target_color        
         self.tracker.cam_to_gun_pos = np.array([cg_x, cg_y, cg_z])
         self.tracker.cam_to_gun_rpy = np.array([cg_r, cg_p, cg_y_ang])
-        self.tracker.bullet_speed = bullet_speed
-        self.tracker.yaw_threshold_deg = yaw_threshold_deg
-        self.tracker.pitch_threshold_deg = pitch_threshold_deg
+        self.tracker.dist_tol = dist_tol
+        self.tracker.max_match_distance = max_match_distance
+        self.tracker.max_match_yaw_diff = max_match_yaw_diff
+        self.tracker.tracking_thres = int(tracking_thres)
+        self.tracker.lost_thres = int(lost_thres)
+        self.tracker.ekf_QR_params = QR_params
+        self.tracker.radius_params = radius_params
         self.tracker.min_spinning_frame = min_spinning_frame
         self.tracker.spinning_frame_lost = spinning_frame_lost
         self.tracker.min_spinning_vel = min_spinning_vel
+        self.tracker.bullet_speed = bullet_speed
+        self.tracker.yaw_threshold_deg = yaw_threshold_deg
+        self.tracker.pitch_threshold_deg = pitch_threshold_deg
         self.imu_rpy = None
         self.tf = RmTF()
         self.bridge = CvBridge() # 初始化转换器
