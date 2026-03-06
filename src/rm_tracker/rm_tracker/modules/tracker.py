@@ -100,6 +100,12 @@ class Tracker:
         self.tick_solve_ballistic = LoopTick()
         self.tick_gimbal_to_deg = LoopTick()
         self.tick_can_fire = LoopTick()
+        # 新增：update 内部细节的打点实例
+        self.tick_ekf_predict = LoopTick()      # EKF 预测耗时
+        self.tick_data_associate = LoopTick()   # 观测数据与预测数据的匹配(关联)耗时
+        self.tick_ekf_update = LoopTick()       # EKF 状态更新耗时
+        self.tick_handle_jump = LoopTick()      # 装甲板跳变处理耗时
+        self.tick_state_machine = LoopTick()    # 状态机流转判定耗时
 
     def _log(self, log_type, msg):
         """
@@ -336,6 +342,7 @@ class Tracker:
         armors: 已经 process_armors 处理过的 Armor 对象列表 (World Frame)
         """
         # 1. EKF 预测
+        self.tick_ekf_predict.tick()
         ekf_prediction = self.ekf.predict(dt)
 
         # 默认目标状态为预测值
@@ -345,6 +352,7 @@ class Tracker:
 
         if len(armors) > 0:
             # 寻找同 ID 且距离最近的装甲板
+            self.tick_data_associate.tick()
             same_id_armor = None
             same_id_count = 0
 
@@ -375,7 +383,8 @@ class Tracker:
             if min_position_diff < self.max_match_distance and yaw_diff < self.max_match_yaw_diff * DEG2RAD:
                 # [情况 A]: 完美匹配
                 matched = True
-
+                # 记录 EKF 观测更新的耗时
+                self.tick_ekf_update.tick()
                 # 更新观测向量
                 # 注意 1: 必须先处理 Yaw 的连续性
                 cont_yaw = self.orientation_to_yaw(self.tracked_armor.yaw)
@@ -391,7 +400,8 @@ class Tracker:
                 self.target_state = self.ekf.update(measurement)
 
             elif same_id_count == 1 and yaw_diff > self.max_match_yaw_diff * DEG2RAD: # 判定为：车转过去了，这是新的一块板子
-
+                # 记录跳变处理的耗时
+                self.tick_handle_jump.tick()
                 self.handle_armor_jump(same_id_armor)
                 matched = True # Jump 之后认为匹配成功，但不需要再次 update EKF（因为 handle 里已经重置了）
 
@@ -410,6 +420,7 @@ class Tracker:
             self.ekf.X[8] = self.radius_params['r_max']
 
         # 3. 状态机流转 (State Machine)
+        self.tick_state_machine.tick()
         if self.tracker_state == self.DETECTING:
             if matched:
                 self.detect_count += 1
