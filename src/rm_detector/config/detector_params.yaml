@@ -15,7 +15,7 @@ rm_detector:
     height_multiplier_min: 1.0
     height_multiplier_max: 3.0
     row_stretch: 2.22
-    col_stretch: 0.66
+    col_stretch: 0.80
 
     # ---- 图像处理参数 ----
     binary_val: 150

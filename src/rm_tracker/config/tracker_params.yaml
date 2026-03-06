@@ -34,16 +34,16 @@ rm_tracker:
     lost_thres: 10              # 连续丢失帧数 (进入 LOST) - int
 
     # [EKF Q/R 参数] - 参考此前代码中的调优值
-    ekf_QR_q_xyz: 20.0          # Process Noise Q: 位置/速度
+    ekf_QR_q_xyz: 120.0          # Process Noise Q: 位置/速度
     ekf_QR_q_yaw: 100.0         # Process Noise Q: 偏航角
     ekf_QR_q_r: 800.0           # Process Noise Q: 半径 (给大一点允许快速变径)
 
-    ekf_QR_r_xyz_factor: 0.05   # Measurement Noise R: 位置因子
+    ekf_QR_r_xyz_factor: 0.005   # Measurement Noise R: 位置因子
     ekf_QR_r_yaw: 0.02          # Measurement Noise R: 角度方差
 
     # [车辆物理参数]
     radius_r1: 0.26             # 车辆半径 1 (m)
-    radius_r2: 0.38              # 车辆半径 2 (m)
+    radius_r2: 0.28              # 车辆半径 2 (m)
     radius_r_max: 0.4              # 车辆最大半径 (m)
     radius_r_min: 0.12              # 车辆最小半径 (m)
 
