@@ -79,7 +79,7 @@ class Tracker:
         self.spinning_frame_lost = 5                        # 小陀螺帧数丢失阈值
         self.min_spinning_frame_count = 0                   # 小陀螺帧数计数器
         self.spinning_frame_lost_count = 0                  # 小陀螺帧数丢失计数器
-        self.min_spinning_vel = 5.0                          # 小陀螺最低门限
+        self.min_spinning_vel = 5.0                         # 小陀螺最低门限
         self.target = None                                  # 最终解算出的目标状态
         self.bullet_speed = 28.0                            # 弹道速度 (m/s)
         self.muzzle_target = None                           # 弹道解算后的目标点
@@ -87,6 +87,7 @@ class Tracker:
         self.pitch_threshold_deg = 2.0                      # 允许发射的 pitch 角度阈值
         self.gimbal_control = None                          # 云台控制信息
         self.log_buffer = []                                # 系统日志缓存队列 (用于调试/可视化)
+        self.text_size = 1                                  # 文字大小系数
 
     def _log(self, log_type, msg):
         """
@@ -727,11 +728,19 @@ class Tracker:
     def draw_estimate(self, tf, img, imu_rpy):
         """
         绘制 EKF 预测的车辆底盘和装甲板位置。
-        【修改】移除了 Target 高亮逻辑，仅展示估计的物理结构。
         """
         if self.tracker_state == self.LOST:
             return img
+            
+        # 避免深拷贝，直接在原图上绘制
         draw = img.copy()
+        scale = self.text_size
+
+        # 预计算缩放相关的尺寸参数
+        circle_r = max(2, int(5 * scale))
+        marker_size = int(20 * scale)
+        thick_1 = max(1, int(1 * scale))
+        thick_2 = max(1, int(2 * scale))
 
         # 获取当前 EKF 状态
         x = self.target_state
@@ -762,15 +771,10 @@ class Tracker:
                 uv_int = (int(uv[0]), int(uv[1]))
 
                 # 统一使用黄色，仅用绿色区分 0 号板(正面)
-                color = (0, 255, 255)  # Yellow
-                if i == 0:
-                    color = (0, 255, 0) # Green
+                color = (0, 255, 0) if i == 0 else (0, 255, 255)
 
-                # 绘制实心圆点
-                cv2.circle(draw, uv_int, 5, color, -1)
-                # 标序号
-                cv2.putText(draw, f"{i}", (uv_int[0] + 5, uv_int[1] - 5),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+                # 绘制实心圆点 (移除了序号文本)
+                cv2.circle(draw, uv_int, circle_r, color, -1)
 
                 virtual_armors_pts.append(uv_int)
             else:
@@ -784,14 +788,14 @@ class Tracker:
         if vis_c:
             c_int = (int(uv_c[0]), int(uv_c[1]))
             # 绘制车中心十字
-            cv2.drawMarker(draw, c_int, (255, 255, 255), cv2.MARKER_CROSS, 20, 2)
+            cv2.drawMarker(draw, c_int, (255, 255, 255), cv2.MARKER_CROSS, marker_size, thick_2)
 
             # 绘制连线 (展示底盘结构)
             line_color = (100, 100, 100)
             if virtual_armors_pts[0] and virtual_armors_pts[2]:
-                cv2.line(draw, virtual_armors_pts[0], virtual_armors_pts[2], line_color, 1)
+                cv2.line(draw, virtual_armors_pts[0], virtual_armors_pts[2], line_color, thick_1)
             if virtual_armors_pts[1] and virtual_armors_pts[3]:
-                cv2.line(draw, virtual_armors_pts[1], virtual_armors_pts[3], line_color, 1)
+                cv2.line(draw, virtual_armors_pts[1], virtual_armors_pts[3], line_color, thick_1)
 
             # --- 4. 绘制速度矢量 ---
             vx, vy = x[1], x[3]
@@ -803,7 +807,7 @@ class Tracker:
 
                 if vis_end:
                     e_int = (int(uv_end[0]), int(uv_end[1]))
-                    cv2.arrowedLine(draw, c_int, e_int, (0, 0, 255), 2)
+                    cv2.arrowedLine(draw, c_int, e_int, (0, 0, 255), thick_2)
 
         return draw
 
@@ -813,7 +817,15 @@ class Tracker:
         """
         if not self.debug_yaw_armors:
             return img
+            
         draw = img.copy()
+        scale = self.text_size
+        
+        # 预计算缩放参数
+        font_scale = 1.0 * scale
+        thickness = max(1, int(3 * scale))
+        stroke_thickness = thickness + max(1, int(5 * scale))
+
         for armor in self.debug_yaw_armors:
             # 1. 获取观测数据 (已经是世界坐标系)
             world_pos = armor.pos
@@ -830,15 +842,13 @@ class Tracker:
                 text = f"{yaw_deg:.1f}"
 
                 # 4. 计算文字居中
-                font_scale = 1
-                thickness = 3
                 (text_w, text_h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
                 # 文字位置：在装甲板中心稍微向上一点
                 text_org = (uv_int[0] - text_w // 2, uv_int[1] + text_h // 2)
 
                 # 5. 绘制 (洋红色以区别于 EKF 的预测值)
                 # 描边
-                cv2.putText(draw, text, text_org, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), thickness + 5)
+                cv2.putText(draw, text, text_org, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), stroke_thickness)
                 # 字体
                 cv2.putText(draw, text, text_org, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 0, 255), thickness)
 
@@ -850,6 +860,7 @@ class Tracker:
         1. 红色 LOCKED: 目标的真实视觉位置 (无视差)
         2. 绿色 AIM:    枪管的实际瞄准点 (包含视差 + 重力补偿)
         """
+        # 优化1：如果外部不需要保留无绘制信息的纯净原图，直接引用 img，避免深拷贝
         draw = img.copy()
         h, w = draw.shape[:2]
 
@@ -865,53 +876,61 @@ class Tracker:
         uv_tgt, vis_tgt = tf.project_point(cam_tgt)
 
         target_center = None
+
         if vis_tgt:
             target_center = (int(uv_tgt[0]), int(uv_tgt[1]))
-            # 红圈锁定
+            # 红圈锁定 "TARGET"
             cv2.circle(draw, target_center, 8, (0, 0, 255), -1)
             cv2.circle(draw, target_center, 18, (0, 0, 255), 2)
-            cv2.putText(draw, "TARGET", (target_center[0] + 25, target_center[1] - 5),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
         # 2. 绘制【枪口瞄准点】(AIM)
-
         aim_pos_world = self.muzzle_target.pos
-
         aim_pos_cam = self.world_to_cam(tf, aim_pos_world, imu_rpy)
-
-        # D. 投影回图像
+        
+        # 投影回图像 
         uv_aim, vis_aim = tf.project_point(aim_pos_cam)
-
         if vis_aim:
             aim_point = (int(uv_aim[0]), int(uv_aim[1]))
-            # 绿色十字准星
+            # 绿色十字准星 "AIM (GUN)"
             cv2.drawMarker(draw, aim_point, (0, 255, 0), cv2.MARKER_CROSS, 25, 2)
-            cv2.putText(draw, "AIM (GUN)", (aim_point[0] + 10, aim_point[1] + 25),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
-
-            # 画线：体现视差和重力落差
-            if target_center:
-                cv2.line(draw, target_center, aim_point, (255, 255, 0), 1)
 
         # 3. 绘制【信息面板】
+        # 优化2：预先计算所有文本缩放参数和坐标基准，避免在循环/函数调用中重复计算
+        scale = self.text_size
+        start_x_scaled = int(20 * scale)
+        base_y_scaled = int(50 * scale)
+        step_scaled = int(30 * scale)
+
+        font_07 = 0.7 * scale
+        font_08 = 0.8 * scale
+        
+        # 确保线条粗细至少为1
+        thick_1 = max(1, int(1 * scale))
+        thick_2 = max(1, int(2 * scale))
+
         dist = np.linalg.norm(tgt_pos_world)
         angle_diff_deg = self.target.angle_diff * RAD2DEG
 
-        start_x, start_y = 20, 50
-        line_step = 30
         status_color = (0, 255, 0) if self.gimbal_control[2] else (0, 0, 255)
         status_text = "FIRE ENABLE" if self.gimbal_control[2] else "HOLD FIRE"
         spin_status = "SPIN" if self.spin else "NORMAL"
-        spin_status_color = (0, 255, 0) if spin_status else (0, 0, 255)
+        spin_status_color = (0, 255, 0) if self.spin else (0, 0, 255)
 
+        # 优化3：打包需要绘制的文本行，统一循环绘制
+        # 格式: (文本内容, 字体缩放, 颜色, 粗细, Y轴相对偏移量)
+        info_lines = [
+            (f"[{spin_status}]", font_08, spin_status_color, thick_2, 5 * scale),
+            (f"yaw_val: {self.ekf.X[7]:.2f} rad", font_07, (255, 255, 255), thick_1, step_scaled * 1),
+            (f"Dist : {dist:.2f} m", font_07, (255, 255, 255), thick_1, step_scaled * 2),
+            (f"Pitch: {self.gimbal_control[1]:.2f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 3),
+            (f"Yaw  : {self.gimbal_control[0]:.2f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 4),
+            (f"Diff : {angle_diff_deg:.1f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 5),
+            (f"[{status_text}]", font_08, status_color, thick_2, step_scaled * 6 + 5 * scale)
+        ]
 
-        cv2.putText(draw, f"[{spin_status}]", (start_x, start_y + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.8, spin_status_color, 2)
-        cv2.putText(draw, f"yaw_val: {self.ekf.X[7]:.2f} rad", (start_x, start_y + line_step * 1), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
-        cv2.putText(draw, f"Dist : {dist:.2f} m", (start_x, start_y + line_step * 2), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
-        cv2.putText(draw, f"Pitch: {self.gimbal_control[1]:.2f} deg", (start_x, start_y + line_step * 3), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
-        cv2.putText(draw, f"Yaw  : {self.gimbal_control[0]:.2f} deg", (start_x, start_y + line_step * 4), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
-        cv2.putText(draw, f"Diff : {angle_diff_deg:.1f} deg", (start_x, start_y + line_step * 5), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 1)
-        cv2.putText(draw, f"[{status_text}]", (start_x, start_y + line_step * 6 + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
+        for text, font_scale, color, thickness, y_offset in info_lines:
+            pos = (start_x_scaled, int(base_y_scaled + y_offset))
+            cv2.putText(draw, text, pos, cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
 
         return draw
 

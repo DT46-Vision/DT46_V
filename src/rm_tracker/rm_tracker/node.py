@@ -33,8 +33,9 @@ class RmTracker(Node):
         self.declare_parameter('rotation_rpy_p', 0.0)           # 陀螺仪到相机姿态变换 -> p
         self.declare_parameter('rotation_rpy_y', -180.0)        # 陀螺仪到相机姿态变换 -> y
         self.declare_parameter('show_rpy', False)               # 陀螺仪调试 - 显示原始数据和调整后的数据
-        self.declare_parameter('debug', False)
-        self.declare_parameter('display', False)            # 显示处理结果
+        self.declare_parameter('debug', False)                  # 显示调试信息
+        self.declare_parameter('text_size', 1)                  # 显示文字大小
+        self.declare_parameter('display', False)                # 显示处理结果
         # -----------------------TRACKER---------------------
         self.declare_parameter('target_color', 0)               # 目标敌方阵营 (0: RED, 1: BLUE)
         self.declare_parameter('cam_to_gun_pos_x', 0.0)         # [外参] 相机相对于枪口的平移向量 -> x (x:右, y:下, z:前)
@@ -72,6 +73,7 @@ class RmTracker(Node):
         self.rotation_rpy = np.array([rotation_r, rotation_p, rotation_y])
         self.show_rpy = self.get_parameter('show_rpy').value  
         self.debug = self.get_parameter('debug').value          # 陀螺仪调试
+        self.text_size = self.get_parameter('text_size').value  # 显示文字大小
         self.display = self.get_parameter('display').value      # 显示处理结果
         # -----------------------TRACKER---------------------
         target_color = self.get_parameter('target_color').value    # 目标敌方阵营
@@ -239,6 +241,8 @@ class RmTracker(Node):
                     self.show_rpy = value
                 elif name == 'debug':
                     self.debug = value
+                elif name == 'text_size':
+                    self.tracker.text_size = value
                 elif name == 'display':
                     self.display = value
 
