@@ -2,7 +2,6 @@ import math
 import numpy as np
 from .ekf import ExtendedKalmanFilter
 import cv2
-import time
 
 # 常量定义
 RAD2DEG = 180.0 / math.pi
@@ -51,8 +50,8 @@ class Tracker:
     TEMP_LOST = 3   # 短暂丢失
 
     def __init__(self):
-        self.last_time = None
         self.c = ColorPrint()
+        self.dt = 0.01
         self.target_color = 0                               # 目标敌方阵营 (0: RED, 1: BLUE)
         self.cam_to_gun_pos = np.array([0.0, -0.05, 0.0])   # [外参] 相机相对于枪口的平移向量 (x:右, y:下, z:前)
         self.cam_to_gun_rpy = np.array([0.0, 0.0, 0.0])     # [外参] 相机相对于枪口的旋转欧拉角 (Roll, Pitch, Yaw)
@@ -96,32 +95,27 @@ class Tracker:
         """
         self.log_buffer.append((log_type, msg))
 
-    def update_dt(self):
+    def update_dt(self, current_ros_time):
         """
-        使用 time.perf_counter() 计算 dt，并记录内部处理 FPS
+        current_ros_time: 传入 node.get_clock().now()
         """
-        current_time = time.perf_counter()
-        
         if self.last_time is None:
-            self.last_time = current_time
+            self.last_time = current_ros_time
             return 0.01
 
-        # 计算实际时间差 (秒)
-        duration = current_time - self.last_time
-        
-        # 计算并记录 FPS (避免除零)
-        fps = 1.0 / duration if duration > 0 else 0.0
-        self._log("fps", f"[Tracker] {self.c.CYAN}Tracker FPS: {fps:.1f}{self.c.RESET}")
+        # 计算纳秒差并转为秒
+        duration = (current_ros_time - self.last_time).nanoseconds / 1e9
 
-        # 钳制异常值 (防止断点调试或卡顿导致 dt 过大使得 EKF 发散)
+        # 钳制异常值
         dt = max(0.001, min(duration, 0.1))
 
         # 指数平滑滤波，减少 dt 抖动对 EKF 的影响
+        # dt = alpha * new_dt + (1 - alpha) * last_dt
         if hasattr(self, 'prev_dt'):
             dt = 0.8 * dt + 0.2 * self.prev_dt
 
         self.prev_dt = dt
-        self.last_time = current_time
+        self.last_time = current_ros_time
         return dt
 
     def cam_to_world(self, tf, raw_xyz, imu_rpy):
@@ -667,7 +661,7 @@ class Tracker:
             gimbal_control[2] = True
         return gimbal_control
 
-    def track(self, tf, msg, imu_rpy):
+    def track(self, tf, msg, imu_rpy, ros_clock):
         """
         【主入口】
         tf: 坐标转换工具
@@ -680,7 +674,8 @@ class Tracker:
         self.log_buffer = []
 
         # 1. 更新时间步长
-        dt = self.update_dt()
+        dt = self.update_dt(ros_clock)
+        self.dt = dt
 
         # 2. 数据预处理 (Cam -> World)
         armors = self.process_armors(tf, msg, imu_rpy)

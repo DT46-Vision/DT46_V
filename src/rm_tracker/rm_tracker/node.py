@@ -410,20 +410,23 @@ class RmTracker(Node):
                 # 阻塞获取数据包
                 data = self.track_queue.get(timeout=1.0)
 
+                ros_clock = self.get_clock().now()
+
                 # 【关键】加锁进行追踪运算，防止与图像渲染线程冲突
                 with self.tracker_lock:
                     # 追踪
                     gimbal_control, logs = self.tracker.track(
                         self.tf, 
                         data['msg'], 
-                        data['imu_rpy']
+                        data['imu_rpy'], 
+                        ros_clock
                     )
 
                 # 发布云台控制指令 (锁外执行)
                 if gimbal_control is not None:
                     GB = GimbalControl()
                     GB.header = Header()
-                    GB.header.stamp = self.get_clock().now().to_msg()
+                    GB.header.stamp = ros_clock.to_msg()
                     GB.header.frame_id = 'tracking_frame'
                     GB.yaw = float(gimbal_control[0])
                     GB.pitch = float(gimbal_control[1])
@@ -440,6 +443,24 @@ class RmTracker(Node):
                         elif log_type == "debug":
                             if self.log_throttler.should_log("tracker_debug"): # 使用特定的 key
                                 self.get_logger().warn(log_msg)
+                
+                if self.tracker.target_color == 0:
+                    target_color_str = f"{self.tracker.c.PINK}跟踪{self.tracker.c.RED}红色{self.tracker.c.RESET}"
+                elif self.tracker.target_color == 1:
+                    target_color_str = f"{self.tracker.c.PINK}跟踪{self.tracker.c.BLUE}蓝色{self.tracker.c.RESET}"
+                else:
+                    target_color_str = f"{self.tracker.c.PINK}我不知道{self.tracker.c.RESET}"
+
+                
+                if self.log_throttler.should_log("gimbal_control_info"): # 使用特定的 key
+                                self.get_logger().info(f"[rm_tracker]"+
+                                                        f"{self.tracker.c.PINK}FPS{self.tracker.c.RESET}: {self.tracker.c.CYAN}{fps:.2f}{self.tracker.c.RESET}"+
+                                                        f" {target_color_str}"
+                                                        f" {self.tracker.c.PINK}Gimbal control{self.tracker.c.RESET}"+
+                                                        f" - {self.tracker.c.GREEN}pitch:{self.tracker.c.RESET} {self.tracker.c.CYAN}{gimbal_control[1]:.2f}{self.tracker.c.RESET}"+
+                                                        f" || {self.tracker.c.GREEN}yaw:{self.tracker.c.RESET} {self.tracker.c.CYAN}{gimbal_control[0]:.2f}{self.tracker.c.RESET}"+
+                                                        f" || {self.tracker.c.GREEN}fire:{self.tracker.c.RESET} {self.tracker.c.CYAN}{gimbal_control[2]:.0f}{self.tracker.c.RESET}"
+                                                        )
                 
             except queue.Empty:
                 continue
