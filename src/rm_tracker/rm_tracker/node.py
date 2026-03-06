@@ -430,12 +430,17 @@ class RmTracker(Node):
                     GB.can_fire = int(gimbal_control[2])
                     self.pub_gimbal_control.publish(GB)
 
-                # 集中处理日志
-                if logs:
-                    for log_key, log_str in logs:
-                        if self.log_throttler.should_log(log_key):
-                            self.get_logger().info(log_str)
+                if self.debug:
+                    for log_type, log_msg in logs:
+                        # 策略 1: 状态切换、初始化、警告 -> 直接打印 (因为频率低且重要)
+                        if log_type in ["sys", "state", "warn", "jump"]:
+                            self.get_logger().info(log_msg)
 
+                        # 策略 2: 调试信息 (如 No match) -> 走节流阀 (防止刷屏)
+                        elif log_type == "debug":
+                            if self.log_throttler.should_log("tracker_debug"): # 使用特定的 key
+                                self.get_logger().warn(log_msg)
+                
             except queue.Empty:
                 continue
 
