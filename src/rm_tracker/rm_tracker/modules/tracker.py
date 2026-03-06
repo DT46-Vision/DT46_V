@@ -1,8 +1,8 @@
 import math
 import numpy as np
-import time
 from .ekf import ExtendedKalmanFilter
 import cv2
+from looptick import LoopTick
 
 # 常量定义
 RAD2DEG = 180.0 / math.pi
@@ -88,6 +88,18 @@ class Tracker:
         self.pitch_threshold_deg = 2.0                      # 允许发射的 pitch 角度阈值
         self.gimbal_control = None                          # 云台控制信息
         self.log_buffer = []                                # 系统日志缓存队列 (用于调试/可视化)
+
+        # 测速
+        self.tick_update_dt = LoopTick()
+        self.tick_process_armors = LoopTick()
+        self.tick_try_init_tracker = LoopTick()
+        self.tick_update = LoopTick()
+        self.tick_find_all_armors = LoopTick()
+        self.tick_find_target = LoopTick()
+        self.tick_world_to_muzzle = LoopTick()
+        self.tick_solve_ballistic = LoopTick()
+        self.tick_gimbal_to_deg = LoopTick()
+        self.tick_can_fire = LoopTick()
 
     def _log(self, log_type, msg):
         """
@@ -661,21 +673,25 @@ class Tracker:
         self.log_buffer = []
 
         # 1. 更新时间步长
+        self.tick_update_dt.tick()
         dt = self.update_dt(ros_clock)
         self.dt = dt
 
         # 2. 数据预处理 (Cam -> World)
+        self.tick_process_armors.tick()
         armors = self.process_armors(tf, msg, imu_rpy)
 
         # 3. 状态机调度
         if self.tracker_state == self.LOST:
             # 如果丢失，尝试初始化
+            self.tick_try_init_tracker.tick()
             self.try_init_tracker(armors)
             # LOST 状态下返回空结果 (0, 0, False)，但带上日志
             return [0.0, 0.0, False], self.log_buffer
         else:
             # 如果正在追踪 (DETECTING / TRACKING / TEMP_LOST)
             # 运行核心更新逻辑 (EKF Predict -> Match -> EKF Update)
+            self.tick_update.tick()
             self.update(armors, dt)
 
         # 4. 检查是否由于丢失太久回到了 LOST
@@ -685,9 +701,11 @@ class Tracker:
             return [0.0, 0.0, False], self.log_buffer
 
         # 5. 生成虚拟装甲板并选敌
+        self.tick_find_all_armors.tick()
         robot_armors = self.find_all_armors()
 
         # 【步骤A】 找出最佳目标（这是相机系坐标！）
+        self.tick_find_target.tick()
         target_cam = self.find_target(robot_armors)
 
         # =================【核心：只打半边/开火窗口逻辑】=================
@@ -695,10 +713,13 @@ class Tracker:
 
         if target_cam is not None:
             # 【步骤B】 转换到枪口系，专门用于解算弹道
+            self.tick_world_to_muzzle.tick()
             target_muzzle = self.world_to_muzzle(target_cam, self.cam_to_gun_pos, tf, imu_rpy)
-
+            self.tick_solve_ballistic.tick()
             gimbal_control = self.solve_ballistic(target_muzzle, self.cam_to_gun_rpy, imu_rpy)
+            self.tick_gimbal_to_deg.tick()
             gimbal_control = self.gimbal_to_deg(gimbal_control)
+            self.tick_can_fire.tick()
             gimbal_control = self.can_fire(gimbal_control)
             self.gimbal_control = gimbal_control
 
