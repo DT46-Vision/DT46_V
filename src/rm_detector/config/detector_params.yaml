@@ -14,6 +14,8 @@ rm_detector:
     height_rate_tol: 1.8
     height_multiplier_min: 1.0
     height_multiplier_max: 3.0
+    roi_crop: true
+    roi_scale: 0.4
     row_stretch: 2.22
     col_stretch: 0.80
 

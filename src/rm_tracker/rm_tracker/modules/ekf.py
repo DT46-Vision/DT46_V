@@ -78,14 +78,8 @@ class ExtendedKalmanFilter:
         dummy_Y = np.zeros(4, dtype=np.float64)
         dummy_I = np.eye(9, dtype=np.float64)
 
-        #dummy_Y = np.zeros(4)
-        #dummy_R = np.eye(4)  # 使用单位阵作为占位，避免 S 矩阵全为 0 导致不可逆
-        
-        #_fast_ekf_predict(self.X, self.P, self.F, self.Q)
         _fast_ekf_predict(dummy_X, dummy_P, dummy_F, dummy_Q)
 
-        # 注意下面这行：第四个参数必须是 dummy_R，不能是 self.R
-        #_fast_ekf_update(self.X, self.P, self.H, dummy_R, dummy_Y, self.I)
         _fast_ekf_update(dummy_X, dummy_P, dummy_H, dummy_R, dummy_Y, dummy_I)
 
     def init_QR(self, q_xyz=20.0, q_yaw=100.0, q_r=800.0, r_xyz_factor=0.05, r_yaw=0.02):
