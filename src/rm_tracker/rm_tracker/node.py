@@ -21,6 +21,8 @@ from rcl_interfaces.msg import SetParametersResult               # 参数回调
 import queue
 import threading
 
+import time
+
 class RmTracker(Node):
     def __init__(self):
         super().__init__('rm_tracker')
@@ -63,6 +65,7 @@ class RmTracker(Node):
         self.declare_parameter('bullet_speed', 28.0)            # 子弹速度
         self.declare_parameter('yaw_threshold_deg', 5.0)        # 允许发射的 yaw 角度阈值
         self.declare_parameter('pitch_threshold_deg', 2.0)      # 允许发射的 pitch 角度阈值
+        self.declare_parameter('show_fps',True)
         # ----------------------获取参数----------------------
         # ------------------------NODE-----------------------
         log_throttle_ms = self.get_parameter('log_throttle_ms').value   # 日志节流
@@ -72,6 +75,7 @@ class RmTracker(Node):
         self.rotation_rpy = np.array([rotation_r, rotation_p, rotation_y])
         self.debug = self.get_parameter('debug').value
         self.show_rpy = self.get_parameter('show_rpy').value            # 陀螺仪调试
+        self.show_fps = self.get_parameter('show_fps').value                 # FPS显示
         self.display = self.get_parameter('display').value      # 显示处理结果
         # -----------------------TRACKER---------------------
         target_color = self.get_parameter('target_color').value    # 目标敌方阵营
@@ -144,6 +148,12 @@ class RmTracker(Node):
         self.imu_rpy = None
         self.tf = RmTF()
         self.bridge = CvBridge() # 初始化转换器
+
+        # FPS 计算
+        self.fps_counter = 0
+        self.process_counter = 0
+        self.render_counter = 0
+        self.last_fps_log_time = self.get_clock().now()  # 上次日志输出时间
 
         # 保持队列和线程初始化不变
         self.track_queue = queue.Queue(maxsize=1)
@@ -372,12 +382,43 @@ class RmTracker(Node):
 
         return SetParametersResult(successful=True)
 
+    # FPS
+    def check_and_log_fps(self):
+        """检查是否到时间输出FPS"""
+        if not self.show_fps:
+            return
+            
+        current_time = self.get_clock().now()
+        dt = (current_time - self.last_fps_log_time).nanoseconds / 1e9
+        
+        if dt >= 1.0:  # 每秒输出一次
+            # 计算FPS
+            detection_fps = self.fps_counter / dt if dt > 0 else 0
+            process_fps = self.process_counter / dt if dt > 0 else 0
+            render_fps = self.render_counter / dt if dt > 0 else 0
+            
+            # 输出日志
+            if self.log_throttler.should_log("fps_display"):
+                self.get_logger().info(
+                    f"[FPS] Detection: {detection_fps:.1f} | Process: {process_fps:.1f} | Render: {render_fps:.1f}"
+                )
+            
+            # 重置计数器和时间
+            self.fps_counter = 0
+            self.process_counter = 0
+            self.render_counter = 0
+            self.last_fps_log_time = current_time
     # ---------- 装甲板数据入队 ----------
     def armors_cb(self, msg: ArmorsMsg):
         """仅负责将最新数据放入队列，不进行耗时计算"""
         if self.imu_rpy is None:
             return
             
+         # 【新增】检查并输出FPS
+        self.check_and_log_fps()
+
+        # 增加检测计数器
+        self.fps_counter += 1
         data = {
             'tf': self.tf,
             'msg': msg,
@@ -405,6 +446,9 @@ class RmTracker(Node):
                 # 阻塞获取数据包
                 data = self.track_queue.get(timeout=1.0)
                 
+                # 【新增】增加处理计数器
+                self.process_counter += 1
+
                 # 【关键】加锁进行追踪运算，防止与图像渲染线程冲突
                 with self.tracker_lock:
                     # 追踪
@@ -469,6 +513,9 @@ class RmTracker(Node):
         if not self.display:
             return
 
+        # 【新增】增加渲染计数器
+        self.render_counter += 1
+        
         try:
             # ROS Image -> OpenCV
             cv_img = self.bridge.imgmsg_to_cv2(msg, "bgr8")
