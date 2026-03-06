@@ -1,6 +1,8 @@
 # ros2 功能包
 import rclpy
 from rclpy.node import Node
+# 文件顶部补充导入
+from rclpy.time import Time
 # 自己写的日志管理器
 from .modules.logger import LogThrottler                         # 日志节流
 # 各种消息类型
@@ -34,7 +36,7 @@ class RmTracker(Node):
         self.declare_parameter('rotation_rpy_y', -180.0)        # 陀螺仪到相机姿态变换 -> y
         self.declare_parameter('show_rpy', False)               # 陀螺仪调试 - 显示原始数据和调整后的数据
         self.declare_parameter('debug', False)                  # 显示调试信息
-        self.declare_parameter('text_size', 1)                  # 显示文字大小
+        self.declare_parameter('text_size', 1.0)                  # 显示文字大小
         self.declare_parameter('display', False)                # 显示处理结果
         # -----------------------TRACKER---------------------
         self.declare_parameter('target_color', 0)               # 目标敌方阵营 (0: RED, 1: BLUE)
@@ -153,6 +155,8 @@ class RmTracker(Node):
 
         # 初始化锁、队列
         self.tracker_lock = threading.Lock()
+        self.render_lock = threading.Lock()   # 新增：专用于保护渲染数据的锁
+        self.render_snapshot = None           # 新增：存储渲染所需的轻量级数据快照
         self.track_queue = queue.Queue(maxsize=1)
         
         # ---------- 最后启动独立线程 ----------
@@ -429,13 +433,24 @@ class RmTracker(Node):
         """独立线程：负责耗时的追踪计算和云台控制发布"""
         while rclpy.ok():
             try:
-                # 阻塞获取数据包
+                # 1. 阻塞获取数据包 (单独处理队列异常)
                 data = self.track_queue.get(timeout=1.0)
+            except queue.Empty:
+                continue
+            except Exception as e:
+                self.get_logger().error(f"获取队列数据异常: {e}")
+                continue
 
-                # 【新增】增加处理计数器
+            try:
+                # 2. 正常获取到数据后，处理逻辑
                 self.process_counter += 1
 
-                ros_clock = self.get_clock().now()
+                # 优先使用相机曝光时的原始时间戳
+                try:
+                    ros_clock = Time.from_msg(data['msg'].header.stamp)
+                except Exception:
+                    # 兜底方案
+                    ros_clock = self.get_clock().now()
 
                 # 【关键】加锁进行追踪运算，防止与图像渲染线程冲突
                 with self.tracker_lock:
@@ -446,6 +461,12 @@ class RmTracker(Node):
                         data['imu_rpy'], 
                         ros_clock
                     )
+                    # 运算完毕后，立刻提取当前状态的快照
+                    snapshot = self.tracker.get_render_snapshot()
+
+                # 将快照写入共享变量（使用极短的渲染锁）
+                with self.render_lock:
+                    self.render_snapshot = snapshot
 
                 # 发布云台控制指令 (锁外执行)
                 if gimbal_control is not None:
@@ -458,37 +479,18 @@ class RmTracker(Node):
                     GB.can_fire = int(gimbal_control[2])
                     self.pub_gimbal_control.publish(GB)
 
+                # 日志处理
                 if self.debug:
                     for log_type, log_msg in logs:
-                        # 策略 1: 状态切换、初始化、警告 -> 直接打印 (因为频率低且重要)
                         if log_type in ["sys", "state", "warn", "jump"]:
                             self.get_logger().info(log_msg)
-
-                        # 策略 2: 调试信息 (如 No match) -> 走节流阀 (防止刷屏)
                         elif log_type == "debug":
-                            if self.log_throttler.should_log("tracker_debug"): # 使用特定的 key
+                            if self.log_throttler.should_log("tracker_debug"):
                                 self.get_logger().warn(log_msg)
                 
-                if self.tracker.target_color == 0:
-                    target_color_str = f"{self.tracker.c.PINK}跟踪{self.tracker.c.RED}红色{self.tracker.c.RESET}"
-                elif self.tracker.target_color == 1:
-                    target_color_str = f"{self.tracker.c.PINK}跟踪{self.tracker.c.BLUE}蓝色{self.tracker.c.RESET}"
-                else:
-                    target_color_str = f"{self.tracker.c.PINK}我不知道{self.tracker.c.RESET}"
-
-                
-                if self.log_throttler.should_log("gimbal_control_info"): # 使用特定的 key
-                                self.get_logger().info(f"[rm_tracker]"+
-                                                        f"{self.tracker.c.PINK}FPS{self.tracker.c.RESET}: {self.tracker.c.CYAN}{self.check_and_get_fps():.2f}{self.tracker.c.RESET}"+
-                                                        f" {target_color_str}"
-                                                        f" {self.tracker.c.PINK}Gimbal control{self.tracker.c.RESET}"+
-                                                        f" - {self.tracker.c.GREEN}pitch:{self.tracker.c.RESET} {self.tracker.c.CYAN}{gimbal_control[1]:.2f}{self.tracker.c.RESET}"+
-                                                        f" || {self.tracker.c.GREEN}yaw:{self.tracker.c.RESET} {self.tracker.c.CYAN}{gimbal_control[0]:.2f}{self.tracker.c.RESET}"+
-                                                        f" || {self.tracker.c.GREEN}fire:{self.tracker.c.RESET} {self.tracker.c.CYAN}{gimbal_control[2]:.0f}{self.tracker.c.RESET}"
-                                                        )
-                
-            except queue.Empty:
-                continue
+                if self.log_throttler.should_log("gimbal_control_info"):
+                    target_color_str = f"{self.tracker.c.PINK}跟踪红色{self.tracker.c.RESET}" if self.tracker.target_color == 0 else f"{self.tracker.c.PINK}跟踪蓝色{self.tracker.c.RESET}" if self.tracker.target_color == 1 else "我不知道"
+                    self.get_logger().info(f"[rm_tracker] FPS: {self.check_and_get_fps():.2f} {target_color_str} Gimbal - pitch: {gimbal_control[1]:.2f} || yaw: {gimbal_control[0]:.2f} || fire: {gimbal_control[2]:.0f}")
 
             except Exception as e:
                 self.get_logger().error(f"处理线程异常: {e}")
@@ -524,21 +526,26 @@ class RmTracker(Node):
         # 性能开关：如果没开启显示，直接不处理图像，节省 CPU
         if not self.display:
             return
-        
+        # 1. 极速获取当前快照并释放锁
+        with self.render_lock:
+            if self.render_snapshot is None:
+                return
+            current_snapshot = self.render_snapshot
         try:
             # ROS Image -> OpenCV
             cv_img = self.bridge.imgmsg_to_cv2(msg, "bgr8")
 
             # 核心绘制逻辑
             if self.imu_rpy is not None and self.tf.has_camera_info:
-                # 【关键】加锁渲染图像，防止此时 worker 线程修改 tracker 内部状态
-                with self.tracker_lock:
-                    ballistic_img, estimate_img, yaw_debug_img = self.tracker.display(
-                        self.debug,
-                        self.tf,
-                        cv_img,
-                        self.imu_rpy
-                    )
+                # 2. 完全无锁渲染：将快照传入新的 display 函数
+                # 【移除】了 with self.tracker_lock:，并加上了 current_snapshot
+                ballistic_img, estimate_img, yaw_debug_img = self.tracker.display_with_snapshot(
+                    current_snapshot,
+                    self.debug,
+                    self.tf,
+                    cv_img,
+                    self.imu_rpy
+                )
             else:
                 return
 

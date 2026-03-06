@@ -2,6 +2,7 @@ import math
 import numpy as np
 from .ekf import ExtendedKalmanFilter
 import cv2
+import copy # 确保在文件顶部导入
 
 # 常量定义
 RAD2DEG = 180.0 / math.pi
@@ -97,25 +98,21 @@ class Tracker:
         self.log_buffer.append((log_type, msg))
 
     def update_dt(self, current_ros_time):
-        """
-        current_ros_time: 传入 node.get_clock().now()
-        """
         if self.last_time is None:
             self.last_time = current_ros_time
             return 0.01
 
-        # 计算纳秒差并转为秒
         duration = (current_ros_time - self.last_time).nanoseconds / 1e9
 
-        # 钳制异常值
-        dt = max(0.001, min(duration, 0.1))
+        # 严格限制最大 dt 为 0.03s (约 33fps 的底线)
+        # 如果卡顿超过此时间，宁可让滤波器认为时间流逝得慢，也不能让 Q 矩阵爆炸
+        dt = max(0.001, min(duration, 0.03))
 
-        # 指数平滑滤波，减少 dt 抖动对 EKF 的影响
-        # dt = alpha * new_dt + (1 - alpha) * last_dt
-        if hasattr(self, 'prev_dt'):
-            dt = 0.8 * dt + 0.2 * self.prev_dt
+        # 【删除原有的平滑逻辑】
+        # if hasattr(self, 'prev_dt'):
+        #     dt = 0.8 * dt + 0.2 * self.prev_dt
+        # self.prev_dt = dt
 
-        self.prev_dt = dt
         self.last_time = current_ros_time
         return dt
 
@@ -725,36 +722,34 @@ class Tracker:
         # 返回解算结果
         return gimbal_control, self.log_buffer
 
-    def draw_estimate(self, tf, img, imu_rpy):
+    def draw_estimate_with_snapshot(self, snapshot, tf, img, imu_rpy):
         """
         绘制 EKF 预测的车辆底盘和装甲板位置。
         """
-        if self.tracker_state == self.LOST:
+        # 【修正】self.tracker_state -> snapshot['tracker_state']
+        if snapshot['tracker_state'] == self.LOST:
             return img
             
-        # 避免深拷贝，直接在原图上绘制
         draw = img.copy()
-        scale = self.text_size
+        scale = snapshot['text_size']
 
-        # 预计算缩放相关的尺寸参数
         circle_r = max(2, int(5 * scale))
         marker_size = int(20 * scale)
         thick_1 = max(1, int(1 * scale))
         thick_2 = max(1, int(2 * scale))
 
-        # 获取当前 EKF 状态
-        x = self.target_state
+        x = snapshot['target_state']
         xc, yc, za = x[0], x[2], x[4]
         yaw = x[6]
         r1 = x[8]
-        r2 = self.another_r
-        dz = self.dz
+        # 【修正】self.another_r -> snapshot['another_r']
+        # 【修正】self.dz -> snapshot['dz']
+        r2 = snapshot['another_r']
+        dz = snapshot['dz']
 
-        # 准备绘制数据，用于画连线
         virtual_armors_pts = []
 
         for i in range(4):
-            # --- 1. 计算虚拟位置 ---
             theta = yaw - i * (math.pi / 2.0)
             r = r1 if (i % 2 == 0) else r2
             z = za if (i % 2 == 0) else (za + dz)
@@ -766,38 +761,28 @@ class Tracker:
             cam_pos = self.world_to_cam(tf, world_pos, imu_rpy)
             uv, visible = tf.project_point(cam_pos)
 
-            # --- 2. 绘制装甲板 (仅作为结构展示) ---
             if visible:
                 uv_int = (int(uv[0]), int(uv[1]))
-
-                # 统一使用黄色，仅用绿色区分 0 号板(正面)
                 color = (0, 255, 0) if i == 0 else (0, 255, 255)
-
-                # 绘制实心圆点 (移除了序号文本)
                 cv2.circle(draw, uv_int, circle_r, color, -1)
-
                 virtual_armors_pts.append(uv_int)
             else:
                 virtual_armors_pts.append(None)
 
-        # --- 3. 绘制中心和连线 ---
         center_world = np.array([xc, yc, za + dz/2.0])
         cam_c = self.world_to_cam(tf, center_world, imu_rpy)
         uv_c, vis_c = tf.project_point(cam_c)
 
         if vis_c:
             c_int = (int(uv_c[0]), int(uv_c[1]))
-            # 绘制车中心十字
             cv2.drawMarker(draw, c_int, (255, 255, 255), cv2.MARKER_CROSS, marker_size, thick_2)
 
-            # 绘制连线 (展示底盘结构)
             line_color = (100, 100, 100)
             if virtual_armors_pts[0] and virtual_armors_pts[2]:
                 cv2.line(draw, virtual_armors_pts[0], virtual_armors_pts[2], line_color, thick_1)
             if virtual_armors_pts[1] and virtual_armors_pts[3]:
                 cv2.line(draw, virtual_armors_pts[1], virtual_armors_pts[3], line_color, thick_1)
 
-            # --- 4. 绘制速度矢量 ---
             vx, vy = x[1], x[3]
             speed = math.sqrt(vx**2 + vy**2)
             if speed > 0.1:
@@ -811,92 +796,79 @@ class Tracker:
 
         return draw
 
-    def draw_observation_yaw(self, tf, img, imu_rpy):
+    def draw_observation_yaw_with_snapshot(self, snapshot, tf, img, imu_rpy):
         """
         绘制 process_armors 中提取的观测装甲板的 Yaw 值
         """
-        if not self.debug_yaw_armors:
+        # 【修正】self.debug_yaw_armors -> snapshot['debug_yaw_armors']
+        if not snapshot['debug_yaw_armors']:
             return img
             
         draw = img.copy()
-        scale = self.text_size
+        scale = snapshot['text_size']
         
-        # 预计算缩放参数
         font_scale = 1.0 * scale
         thickness = max(1, int(3 * scale))
         stroke_thickness = thickness + max(1, int(5 * scale))
 
-        for armor in self.debug_yaw_armors:
-            # 1. 获取观测数据 (已经是世界坐标系)
+        # 【修正】self.debug_yaw_armors -> snapshot['debug_yaw_armors']
+        for armor in snapshot['debug_yaw_armors']:
             world_pos = armor.pos
             raw_yaw_rad = armor.yaw
 
-            # 2. 转换回像素坐标
             cam_pos = self.world_to_cam(tf, world_pos, imu_rpy)
             uv, visible = tf.project_point(cam_pos)
 
             if visible:
                 uv_int = (int(uv[0]), int(uv[1]))
-
                 yaw_deg = raw_yaw_rad
                 text = f"{yaw_deg:.1f}"
 
-                # 4. 计算文字居中
                 (text_w, text_h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
-                # 文字位置：在装甲板中心稍微向上一点
                 text_org = (uv_int[0] - text_w // 2, uv_int[1] + text_h // 2)
 
-                # 5. 绘制 (洋红色以区别于 EKF 的预测值)
-                # 描边
                 cv2.putText(draw, text, text_org, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), stroke_thickness)
-                # 字体
                 cv2.putText(draw, text, text_org, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 0, 255), thickness)
 
         return draw
 
-    def draw_ballistic(self, tf, img, imu_rpy):
+    # 【修正】补上了 snapshot 参数
+    def draw_ballistic_with_snapshot(self, snapshot, tf, img, imu_rpy):
         """
-        绘制弹道解算视图：
-        1. 红色 LOCKED: 目标的真实视觉位置 (无视差)
-        2. 绿色 AIM:    枪管的实际瞄准点 (包含视差 + 重力补偿)
+        绘制弹道解算视图
         """
-        # 优化1：如果外部不需要保留无绘制信息的纯净原图，直接引用 img，避免深拷贝
         draw = img.copy()
         h, w = draw.shape[:2]
 
-        if self.target is None or self.tracker_state == self.LOST:
+        # 【修正】self.target -> snapshot['target'] 和 snapshot['tracker_state']
+        if snapshot['target'] is None or snapshot['tracker_state'] == self.LOST:
             cv2.putText(draw, "SEARCHING...", (w//2 - 80, h//2),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (150, 150, 150), 2)
             return draw
 
-        # 1. 绘制【目标装甲板】(LOCKED)
-        tgt_pos_world = self.target.pos
+        # 【修正】self.target.pos -> snapshot['target'].pos
+        tgt_pos_world = snapshot['target'].pos
 
         cam_tgt = self.world_to_cam(tf, tgt_pos_world, imu_rpy)
         uv_tgt, vis_tgt = tf.project_point(cam_tgt)
 
-        target_center = None
-
         if vis_tgt:
             target_center = (int(uv_tgt[0]), int(uv_tgt[1]))
-            # 红圈锁定 "TARGET"
             cv2.circle(draw, target_center, 8, (0, 0, 255), -1)
             cv2.circle(draw, target_center, 18, (0, 0, 255), 2)
 
-        # 2. 绘制【枪口瞄准点】(AIM)
-        aim_pos_world = self.muzzle_target.pos
-        aim_pos_cam = self.world_to_cam(tf, aim_pos_world, imu_rpy)
-        
-        # 投影回图像 
-        uv_aim, vis_aim = tf.project_point(aim_pos_cam)
-        if vis_aim:
-            aim_point = (int(uv_aim[0]), int(uv_aim[1]))
-            # 绿色十字准星 "AIM (GUN)"
-            cv2.drawMarker(draw, aim_point, (0, 255, 0), cv2.MARKER_CROSS, 25, 2)
+        # 【修正】self.muzzle_target.pos -> snapshot['muzzle_target'].pos
+        if snapshot.get('muzzle_target') is not None:
+            aim_pos_world = snapshot['muzzle_target'].pos
+            aim_pos_cam = self.world_to_cam(tf, aim_pos_world, imu_rpy)
+            
+            uv_aim, vis_aim = tf.project_point(aim_pos_cam)
+            if vis_aim:
+                aim_point = (int(uv_aim[0]), int(uv_aim[1]))
+                cv2.drawMarker(draw, aim_point, (0, 255, 0), cv2.MARKER_CROSS, 25, 2)
 
-        # 3. 绘制【信息面板】
-        # 优化2：预先计算所有文本缩放参数和坐标基准，避免在循环/函数调用中重复计算
-        scale = self.text_size
+        # 【修正】self.text_size -> snapshot['text_size']
+        scale = snapshot['text_size']
         start_x_scaled = int(20 * scale)
         base_y_scaled = int(50 * scale)
         step_scaled = int(30 * scale)
@@ -904,26 +876,30 @@ class Tracker:
         font_07 = 0.7 * scale
         font_08 = 0.8 * scale
         
-        # 确保线条粗细至少为1
         thick_1 = max(1, int(1 * scale))
         thick_2 = max(1, int(2 * scale))
 
         dist = np.linalg.norm(tgt_pos_world)
-        angle_diff_deg = self.target.angle_diff * RAD2DEG
+        # 【修正】self.target.angle_diff -> snapshot['target'].angle_diff
+        angle_diff_deg = snapshot['target'].angle_diff * RAD2DEG
 
-        status_color = (0, 255, 0) if self.gimbal_control[2] else (0, 0, 255)
-        status_text = "FIRE ENABLE" if self.gimbal_control[2] else "HOLD FIRE"
-        spin_status = "SPIN" if self.spin else "NORMAL"
-        spin_status_color = (0, 255, 0) if self.spin else (0, 0, 255)
+        # 【修正】self.gimbal_control 和 self.spin 处理
+        gc = snapshot['gimbal_control']
+        if gc is None:
+            gc = [0.0, 0.0, False]
 
-        # 优化3：打包需要绘制的文本行，统一循环绘制
-        # 格式: (文本内容, 字体缩放, 颜色, 粗细, Y轴相对偏移量)
+        status_color = (0, 255, 0) if gc[2] else (0, 0, 255)
+        status_text = "FIRE ENABLE" if gc[2] else "HOLD FIRE"
+        spin_status = "SPIN" if snapshot['spin'] else "NORMAL"
+        spin_status_color = (0, 255, 0) if snapshot['spin'] else (0, 0, 255)
+
+        # 【修正】self.ekf.X[7] -> snapshot['ekf_yaw_vel']
         info_lines = [
             (f"[{spin_status}]", font_08, spin_status_color, thick_2, 5 * scale),
-            (f"yaw_val: {self.ekf.X[7]:.2f} rad", font_07, (255, 255, 255), thick_1, step_scaled * 1),
+            (f"yaw_val: {snapshot['ekf_yaw_vel']:.2f} rad", font_07, (255, 255, 255), thick_1, step_scaled * 1),
             (f"Dist : {dist:.2f} m", font_07, (255, 255, 255), thick_1, step_scaled * 2),
-            (f"Pitch: {self.gimbal_control[1]:.2f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 3),
-            (f"Yaw  : {self.gimbal_control[0]:.2f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 4),
+            (f"Pitch: {gc[1]:.2f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 3),
+            (f"Yaw  : {gc[0]:.2f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 4),
             (f"Diff : {angle_diff_deg:.1f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 5),
             (f"[{status_text}]", font_08, status_color, thick_2, step_scaled * 6 + 5 * scale)
         ]
@@ -934,11 +910,27 @@ class Tracker:
 
         return draw
 
-    def display(self, flag, tf, cv_img, imu_rpy):
+    def display_with_snapshot(self, snapshot, flag, tf, cv_img, imu_rpy):
         estimate_img = None
         yaw_debug_img = None
-        ballistic_img = self.draw_ballistic(tf, cv_img, imu_rpy)
+        ballistic_img = self.draw_ballistic_with_snapshot(snapshot,tf, cv_img, imu_rpy)
         if flag:
-            estimate_img = self.draw_estimate(tf, cv_img, imu_rpy)
-            yaw_debug_img = self.draw_observation_yaw(tf, cv_img, imu_rpy)
+            estimate_img = self.draw_estimate_with_snapshot(snapshot,tf, cv_img, imu_rpy)
+            yaw_debug_img = self.draw_observation_yaw_with_snapshot(snapshot,tf, cv_img, imu_rpy)
         return ballistic_img, estimate_img, yaw_debug_img
+    
+    def get_render_snapshot(self):
+        """提取当前状态快照，用于无锁渲染"""
+        return {
+            'tracker_state': self.tracker_state,
+            'target_state': np.copy(self.target_state),
+            'another_r': self.another_r,
+            'dz': self.dz,
+            'debug_yaw_armors': copy.deepcopy(self.debug_yaw_armors),
+            'target': copy.deepcopy(self.target),
+            'muzzle_target': copy.deepcopy(self.muzzle_target),
+            'spin': self.spin,
+            'gimbal_control': copy.deepcopy(self.gimbal_control) if self.gimbal_control else None,
+            'ekf_yaw_vel': self.ekf.X[7] if self.ekf else 0.0,
+            'text_size': self.text_size
+        }
