@@ -124,7 +124,6 @@ class RmTracker(Node):
         # ----------------------初始化对象----------------------
         self.log_throttler = LogThrottler(self, log_throttle_ms)        # 1. 初始化 LogThrottler
         self.tracker = Tracker()                                        # 2. 初始化 Tracker   
-        self.tracker_lock = threading.Lock()                            # 3. 初始化锁
         self.tracker.target_color = target_color
         self.tracker.ekf_QR_params = QR_params
         self.tracker.radius_params = radius_params
@@ -145,8 +144,16 @@ class RmTracker(Node):
         self.tf = RmTF()
         self.bridge = CvBridge() # 初始化转换器
 
-        # 保持队列和线程初始化不变
+        # ---------- 优先初始化变量 ----------
+        # FPS 计算
+        self.process_counter = 0
+        self.last_fps_log_time = self.get_clock().now()  # 上次日志输出时间
+
+        # 初始化锁、队列
+        self.tracker_lock = threading.Lock()
         self.track_queue = queue.Queue(maxsize=1)
+        
+        # ---------- 最后启动独立线程 ----------
         self.worker_thread = threading.Thread(target=self._processing_worker, daemon=True)
         self.worker_thread.start()
 
@@ -378,6 +385,17 @@ class RmTracker(Node):
                 self.tracker.tracked_id = None
 
         return SetParametersResult(successful=True)
+    # FPS
+    def check_and_get_fps(self):
+        """检查并更新FPS"""
+        current_time = self.get_clock().now()
+        dt = (current_time - self.last_fps_log_time).nanoseconds / 1e9
+  
+        self.current_fps = self.process_counter / dt
+        self.process_counter = 0
+        self.last_fps_log_time = current_time
+            
+        return self.current_fps
 
     # ---------- 装甲板数据入队 ----------
     def armors_cb(self, msg: ArmorsMsg):
@@ -409,6 +427,9 @@ class RmTracker(Node):
             try:
                 # 阻塞获取数据包
                 data = self.track_queue.get(timeout=1.0)
+
+                # 【新增】增加处理计数器
+                self.process_counter += 1
 
                 ros_clock = self.get_clock().now()
 
@@ -454,7 +475,7 @@ class RmTracker(Node):
                 
                 if self.log_throttler.should_log("gimbal_control_info"): # 使用特定的 key
                                 self.get_logger().info(f"[rm_tracker]"+
-                                                        f"{self.tracker.c.PINK}FPS{self.tracker.c.RESET}: {self.tracker.c.CYAN}{fps:.2f}{self.tracker.c.RESET}"+
+                                                        f"{self.tracker.c.PINK}FPS{self.tracker.c.RESET}: {self.tracker.c.CYAN}{self.check_and_get_fps():.2f}{self.tracker.c.RESET}"+
                                                         f" {target_color_str}"
                                                         f" {self.tracker.c.PINK}Gimbal control{self.tracker.c.RESET}"+
                                                         f" - {self.tracker.c.GREEN}pitch:{self.tracker.c.RESET} {self.tracker.c.CYAN}{gimbal_control[1]:.2f}{self.tracker.c.RESET}"+
@@ -508,26 +529,30 @@ class RmTracker(Node):
             if self.imu_rpy is not None and self.tf.has_camera_info:
                 # 【关键】加锁渲染图像，防止此时 worker 线程修改 tracker 内部状态
                 with self.tracker_lock:
-                    if self.debug:
-                        estimate_img = self.tracker.draw_estimate(self.tf, cv_img, self.imu_rpy)
-                        yaw_debug_img = self.tracker.draw_observation_yaw(self.tf, cv_img, self.imu_rpy)
-                    ballistic_img = self.tracker.draw_ballistic(self.tf, cv_img, self.imu_rpy)
+                    ballistic_img, estimate_img, yaw_debug_img = self.tracker.display(
+                        self.debug,
+                        self.tf,
+                        cv_img,
+                        self.imu_rpy
+                    )
             else:
                 return
 
             # OpenCV -> ROS Image 并发布
-            if self.debug:
+            if estimate_img is not None:
                 out_msg = self.bridge.cv2_to_imgmsg(estimate_img, "bgr8")
                 out_msg.header = msg.header
                 self.pub_estimate_img.publish(out_msg)
-
+                
+            if ballistic_img is not None:
+                out_msg = self.bridge.cv2_to_imgmsg(ballistic_img, "bgr8")
+                out_msg.header = msg.header
+                self.pub_ballistic_img.publish(out_msg)
+                
+            if yaw_debug_img is not None:
                 out_msg = self.bridge.cv2_to_imgmsg(yaw_debug_img, "bgr8")
                 out_msg.header = msg.header
                 self.pub_yaw_debug_img.publish(out_msg)
-
-            out_msg = self.bridge.cv2_to_imgmsg(ballistic_img, "bgr8")
-            out_msg.header = msg.header
-            self.pub_ballistic_img.publish(out_msg)
 
         except Exception as e:
             self.get_logger().error(f"图像处理回调异常: {e}")

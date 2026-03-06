@@ -907,3 +907,12 @@ class Tracker:
         cv2.putText(draw, f"[{status_text}]", (start_x, start_y + line_step * 6 + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.8, status_color, 2)
 
         return draw
+
+    def display(self, flag, tf, cv_img, imu_rpy):
+        estimate_img = None
+        yaw_debug_img = None
+        ballistic_img = self.draw_ballistic(tf, cv_img, imu_rpy)
+        if flag:
+            estimate_img = self.draw_estimate(tf, cv_img, imu_rpy)
+            yaw_debug_img = self.draw_observation_yaw(tf, cv_img, imu_rpy)
+        return ballistic_img, estimate_img, yaw_debug_img
