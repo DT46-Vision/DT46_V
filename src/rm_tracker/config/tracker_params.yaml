@@ -59,3 +59,5 @@ rm_tracker:
     yaw_threshold_deg: 5.0     # 允许发射的 yaw 角度阈值
     pitch_threshold_deg: 5.0   # 允许发射的 pitch 角度阈值
 
+    text_size: 1.5
+
