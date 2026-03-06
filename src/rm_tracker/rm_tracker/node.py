@@ -203,7 +203,7 @@ class RmTracker(Node):
         )
 
         # 初始化 looptick 实例
-        self.imu_rpy = LoopTick()
+        self.imu_rpy_ = LoopTick()
 
     def is_changed(self, old_val, new_val, tol=1e-5):
         return abs(float(old_val) - float(new_val)) > tol
@@ -380,7 +380,7 @@ class RmTracker(Node):
         return SetParametersResult(successful=True)
 
     def imu_rpy_cb(self, msg: Vector3Stamped):# 记录图像处理回调的运行状态
-        self.imu_rpy.tick()
+        self.imu_rpy_.tick()
         raw_rpy = [msg.vector.x, msg.vector.y, msg.vector.z]
 
         imu_rpy = self.tf.rotate_pose_axis(raw_rpy, self.rotation_rpy)
