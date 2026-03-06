@@ -303,12 +303,19 @@ class Tracker:
         # 修正中心位置，但【保留现有的速度状态】
         if np.linalg.norm(current_p - infer_p) > self.max_match_distance:
             r = self.target_state[8]
-            self.target_state[0] = current_p[0] + r * np.cos(yaw) # 修正 xc
-            # 删除了 v_xc = 0，保留原有速度 self.target_state[1]
-            self.target_state[2] = current_p[1] + r * np.sin(yaw) # 修正 yc
-            # 删除了 v_yc = 0，保留原有速度 self.target_state[3]
-            self.target_state[4] = current_p[2]                   # 修正 za
-            # 删除了 v_za = 0，保留原有速度 self.target_state[5]
+            
+            # 先用当前 yaw 试算
+            test_xc = current_p[0] + r * np.cos(yaw)
+            test_yc = current_p[1] + r * np.sin(yaw)
+            
+            # 模长判断
+            if (current_p[0]**2 + current_p[1]**2) > (test_xc**2 + test_yc**2):
+                # 如果法向量反了，同样翻转 yaw
+                yaw = self.orientation_to_yaw(current_armor.yaw + np.pi) 
+                self.target_state[6] = yaw  # 必须同步更新状态机里的 yaw
+                
+            self.target_state[0] = current_p[0] + r * np.cos(yaw)
+            self.target_state[2] = current_p[1] + r * np.sin(yaw)
 
             self._log("warn", f"[Tracker] {self.c.RED}Jump Error too large, Adjusted Center Position!{self.c.RESET}")
 

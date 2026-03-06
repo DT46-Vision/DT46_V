@@ -90,13 +90,31 @@ class ExtendedKalmanFilter:
         self.r_yaw = r_yaw
 
     def init_state(self, xa, ya, za, yaw, r0):
-        xc = xa + r0 * np.cos(yaw)
-        yc = ya + r0 * np.sin(yaw)
+        offset_x = r0 * np.cos(yaw)
+        offset_y = r0 * np.sin(yaw)
 
-        # 使用 [:] 原位赋值，不改变内存地址
+        # 默认使用加法公式计算
+        xc = xa + offset_x
+        yc = ya + offset_y
+
+        norm_a_sq = xa**2 + ya**2
+        norm_c_sq = xc**2 + yc**2
+
+        # 如果发现装甲板比车体中心还远，说明 yaw 的法向量反了
+        if norm_a_sq > norm_c_sq:
+            # 直接翻转 yaw 角度，并重新计算真正的中心点
+            # 引入 math 模块中的 pi，或者传入 numpy 的 np.pi
+            yaw = (yaw + np.pi) % (2 * np.pi) - np.pi 
+            
+            # 使用修正后的 yaw 重新计算 (此时相当于减法，但 yaw 的状态也被正确更新了)
+            offset_x = r0 * np.cos(yaw)
+            offset_y = r0 * np.sin(yaw)
+            xc = xa + offset_x
+            yc = ya + offset_y
+
+        # 初始化状态向量，此时传入的 yaw 已经是修正过后的了
         self.X[:] = [xc, 0.0, yc, 0.0, za, 0.0, yaw, 0.0, r0]
 
-        # 同样原位重置 P
         self.P.fill(0.0)
         np.fill_diagonal(self.P, 1.0)
 
