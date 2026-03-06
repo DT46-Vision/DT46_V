@@ -285,8 +285,19 @@ class Tracker:
         yaw = self.orientation_to_yaw(current_armor.yaw)
         self.target_state[6] = yaw
 
-        self.dz = self.target_state[4] - current_armor.pos[2]
+        # ================== 修改部分开始 ==================
+        raw_dz = self.target_state[4] - current_armor.pos[2]
+        
+        # 1. 增加物理限制：RoboMaster 机器人的装甲板高度差通常在 0 ~ 15cm 之间
+        # 这里钳制在 [-0.15, 0.15] 米，防止异常 PnP 导致 dz 发散
+        self.dz = np.clip(raw_dz, -0.15, 0.15)
+        
         self.target_state[4] = current_armor.pos[2]
+
+        # 2. 斩断错误积分：跳变是观测目标的切换，并非车体发生了垂直运动。
+        # 必须将 Z 轴速度 (v_za) 清零，防止 EKF 产生虚假惯性导致高度飞天
+        self.target_state[5] = 0.0  
+        # ================== 修改部分结束 ==================
 
         # 交换半径
         temp_r = self.target_state[8]
@@ -408,7 +419,12 @@ class Tracker:
         self.target_state = np.nan_to_num(self.target_state, nan=0.0, posinf=100.0, neginf=-100.0)
         self.target_state[1] = np.clip(self.target_state[1], -15.0, 15.0)  # v_xc
         self.target_state[3] = np.clip(self.target_state[3], -15.0, 15.0)  # v_yc
-        self.target_state[5] = np.clip(self.target_state[5], -15.0, 15.0)  # v_za
+        
+        # ================== 修改部分 ==================
+        # 地面机器人的 Z 轴运动主要是悬挂起伏和地形变化，不可能达到 15m/s
+        # 限制在 [-2.0, 2.0] m/s 足以应对一般的坡道和颠簸，防止状态炸裂
+        self.target_state[5] = np.clip(self.target_state[5], -2.0, 2.0)    # v_za
+        # ============================================
         self.ekf.X = self.target_state
 
         # 3. 状态机流转 (State Machine)
