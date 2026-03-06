@@ -9,7 +9,6 @@ from geometry_msgs.msg import Vector3Stamped                     # 解析 dm 陀
 from cv_bridge import CvBridge                                   # ros图像-cv图像 转换器
 from sensor_msgs.msg import Image, CameraInfo                    # 原始图像、相机内参 消息
 # 消息发布
-from rclpy.publisher import Publisher
 from std_msgs.msg import Header
 # 追踪器
 import numpy as np                                               # 必要数学库
