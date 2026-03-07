@@ -344,6 +344,9 @@ class Tracker:
         self.ekf.P[2, 2] += 0.05  # yc 的方差轻微放大
         self.ekf.P[4, 4] += 0.05  # za 的方差轻微放大
         self.ekf.P[6, 6] += 0.2   # yaw 角度的方差适度放大
+        
+        # [新增] 给半径的方差稍微松个绑，让它能适应新板子的物理误差
+        self.ekf.P[8, 8] += 0.01
     def update(self, armors, dt):
         """
         armors: 已经 process_armors 处理过的 Armor 对象列表 (World Frame)
