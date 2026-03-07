@@ -1,5 +1,6 @@
 import numpy as np
 from numba import njit
+import math
 
 @njit(fastmath=True)
 def _fast_ekf_predict(X, P, F, Q):
@@ -10,8 +11,24 @@ def _fast_ekf_predict(X, P, F, Q):
 
 @njit(fastmath=True)
 def _fast_ekf_update(X, P, H, R, Y, I):
-    # 计算卡尔曼增益 K
+    # 计算 Innovation 协方差 S
     S = H @ P @ H.T + R
+    
+    # --- 【新增：马氏距离计算与野值剔除】 ---
+    # 计算马氏距离的平方: D^2 = Y^T * S^-1 * Y
+    # 使用 np.linalg.solve 求解 S^-1 * Y
+    S_inv_Y = np.linalg.solve(S, Y)
+    mahalanobis_sq = np.dot(Y, S_inv_Y)
+    
+    # 自由度为 4 (x, y, z, yaw) 的卡方分布，99% 置信区间的临界值约为 13.28
+    # 如果马氏距离平方大于该阈值，判定为野值，直接拒绝更新，返回纯预测值
+    if mahalanobis_sq > 15.0: 
+        # 【关键修复】必须返回 .copy()，保证返回的数组内存布局与新建数组一致
+        # 防止 Numba 因内存特征变化而每一帧都在疯狂重编译
+        return X.copy(), P.copy()
+    # ----------------------------------------
+
+    # 计算卡尔曼增益 K
     K = np.linalg.solve(S.T, (P @ H.T).T).T
 
     # 更新状态 X
@@ -82,12 +99,13 @@ class ExtendedKalmanFilter:
 
         _fast_ekf_update(dummy_X, dummy_P, dummy_H, dummy_R, dummy_Y, dummy_I)
 
-    def init_QR(self, q_xyz=20.0, q_yaw=100.0, q_r=800.0, r_xyz_factor=0.05, r_yaw=0.02):
+    def init_QR(self, q_xyz=20.0, q_yaw=100.0, q_r=800.0, r_xyz_factor=0.05, r_yaw=0.02, stable_dist = 1.5):
         self.s2qxyz = q_xyz
         self.s2qyaw = q_yaw
         self.s2qr   = q_r
         self.r_xyz_factor = r_xyz_factor
         self.r_yaw = r_yaw
+        self.stable_dist = stable_dist
 
     def init_state(self, xa, ya, za, yaw, r0):
         offset_x = r0 * np.cos(yaw)
@@ -208,11 +226,23 @@ class ExtendedKalmanFilter:
 
         obs_x, obs_y, obs_z = Z[0], Z[1], Z[2]
 
+        # 计算当前观测点到云台中心的水平距离 (假设世界坐标系原点在云台)
+        # 如果你的世界系原点就是当前相机/云台投影点，可以直接用模长
+        dist_h = math.sqrt(obs_x**2 + obs_y**2)
+
         base_noise = 0.05  # 设置一个保底噪声
         self.R[0,0] = abs(self.r_xyz_factor * obs_x) + base_noise
         self.R[1,1] = abs(self.r_xyz_factor * obs_y) + base_noise
         self.R[2,2] = abs(self.r_xyz_factor * obs_z) + base_noise
-        self.R[3,3] = self.r_yaw
+        
+        # 【新增：远距离 Yaw 角信任降级】
+        # 设定 1.5 米为稳定阈值。超过此距离，Yaw 噪声迅速放大
+        if dist_h > self.stable_dist:
+            # 使用二次方放大噪声，使其在 3 米时几乎完全不信任 PnP 的 Yaw
+            dynamic_r_yaw = self.r_yaw * ((dist_h / 1.5) ** 2) 
+            self.R[3,3] = min(dynamic_r_yaw, 10.0) # 设置一个上限防止矩阵奇异
+        else:
+            self.R[3,3] = self.r_yaw
 
         # 3. 计算预计观测值 h(x)
         xc, yc, za_state = self.X[0], self.X[2], self.X[4]

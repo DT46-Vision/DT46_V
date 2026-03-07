@@ -2,7 +2,6 @@ import math
 import numpy as np
 from .ekf import ExtendedKalmanFilter
 import cv2
-import copy # 确保在文件顶部导入
 
 # 常量定义
 RAD2DEG = 180.0 / math.pi
@@ -32,7 +31,7 @@ class ColorPrint:
 
 class Armor:
     # 限制允许的属性，省掉 __dict__ 的内存开销
-    __slots__ = ['id', 'pos', 'yaw', 'index', 'angle_diff', 'cost']
+    __slots__ = ['id', 'pos', 'yaw', 'index', 'angle_diff']
 
     def __init__(self, id, x, y, z, yaw, index=None):
         self.id = str(id)
@@ -42,6 +41,13 @@ class Armor:
         # 之前在字典里乱塞的属性，现在正式给名分
         self.index = index      # 0,1,2,3 (装甲板序号)
         self.angle_diff = 0.0   # 枪口偏离目标的角度
+    def clone(self):
+        """
+        【关键修复】手写极速克隆，替代耗时百倍的 copy.deepcopy
+        """
+        a = Armor(self.id, self.pos[0], self.pos[1], self.pos[2], self.yaw, self.index)
+        a.angle_diff = self.angle_diff
+        return a
 
 class Tracker:
     # 状态机枚举
@@ -285,19 +291,20 @@ class Tracker:
         yaw = self.orientation_to_yaw(current_armor.yaw)
         self.target_state[6] = yaw
 
-        # ================== 修改部分开始 ==================
+        # ================== 物理状态修正开始 ==================
         raw_dz = self.target_state[4] - current_armor.pos[2]
         
-        # 1. 增加物理限制：RoboMaster 机器人的装甲板高度差通常在 0 ~ 15cm 之间
-        # 这里钳制在 [-0.15, 0.15] 米，防止异常 PnP 导致 dz 发散
-        self.dz = np.clip(raw_dz, -0.15, 0.15)
-        
+        # 1. 钳制高度差，防止异常 PnP 导致 dz 发散 (限制在 ±15cm)
+        self.dz = np.clip(raw_dz, -0.085, 0.085)
         self.target_state[4] = current_armor.pos[2]
 
-        # 2. 斩断错误积分：跳变是观测目标的切换，并非车体发生了垂直运动。
-        # 必须将 Z 轴速度 (v_za) 清零，防止 EKF 产生虚假惯性导致高度飞天
+        # 2. 斩断 Z 轴错误积分：将 Z 轴速度 (v_za) 清零
         self.target_state[5] = 0.0  
-        # ================== 修改部分结束 ==================
+
+        # 3. 施加水平速度阻尼：削弱跳变带来的虚假惯性
+        self.target_state[1] *= 0.8  # v_xc 衰减
+        self.target_state[3] *= 0.8  # v_yc 衰减
+        # ================== 物理状态修正结束 ==================
 
         # 交换半径
         temp_r = self.target_state[8]
@@ -309,7 +316,7 @@ class Tracker:
         current_p = current_armor.pos
         infer_p = self.get_armor_position_from_state(self.target_state)
 
-        # 修正中心位置，但【保留现有的速度状态】
+        # 修正中心位置，但保留现有的速度状态
         if np.linalg.norm(current_p - infer_p) > self.max_match_distance:
             r = self.target_state[8]
             
@@ -321,23 +328,22 @@ class Tracker:
             if (current_p[0]**2 + current_p[1]**2) > (test_xc**2 + test_yc**2):
                 # 如果法向量反了，同样翻转 yaw
                 yaw = self.orientation_to_yaw(current_armor.yaw + np.pi) 
-                self.target_state[6] = yaw  # 必须同步更新状态机里的 yaw
+                self.target_state[6] = yaw  # 同步更新状态机里的 yaw
                 
             self.target_state[0] = current_p[0] + r * np.cos(yaw)
             self.target_state[2] = current_p[1] + r * np.sin(yaw)
 
             self._log("warn", f"[Tracker] {self.c.RED}Jump Error too large, Adjusted Center Position!{self.c.RESET}")
 
+        # 同步状态到 EKF
         self.ekf.X = self.target_state
 
-        # 【核心修改】软重置协方差，而不是使用 np.eye(9)
-        # 适度放大位置和角度的方差，让滤波器在跳变后几帧稍微更信任观测，
-        # 但绝不动速度和半径的方差，防止它们乱飘
+        # ================== 协方差软重置 ==================
+        # 适度放大位置和角度的方差，让滤波器在跳变后几帧稍微更信任观测
         self.ekf.P[0, 0] += 0.05  # xc 的方差轻微放大
         self.ekf.P[2, 2] += 0.05  # yc 的方差轻微放大
         self.ekf.P[4, 4] += 0.05  # za 的方差轻微放大
         self.ekf.P[6, 6] += 0.2   # yaw 角度的方差适度放大
-
     def update(self, armors, dt):
         """
         armors: 已经 process_armors 处理过的 Armor 对象列表 (World Frame)
@@ -942,11 +948,13 @@ class Tracker:
             'target_state': np.copy(self.target_state),
             'another_r': self.another_r,
             'dz': self.dz,
-            'debug_yaw_armors': copy.deepcopy(self.debug_yaw_armors),
-            'target': copy.deepcopy(self.target),
-            'muzzle_target': copy.deepcopy(self.muzzle_target),
+            # 【关键修复】使用列表推导式和 clone() 替换深拷贝
+            'debug_yaw_armors': [a.clone() for a in self.debug_yaw_armors],
+            'target': self.target.clone() if self.target else None,
+            'muzzle_target': self.muzzle_target.clone() if self.muzzle_target else None,
             'spin': self.spin,
-            'gimbal_control': copy.deepcopy(self.gimbal_control) if self.gimbal_control else None,
+            # 【关键修复】列表的浅拷贝非常快，无需 deepcopy
+            'gimbal_control': list(self.gimbal_control) if self.gimbal_control else None,
             'ekf_yaw_vel': self.ekf.X[7] if self.ekf else 0.0,
             'text_size': self.text_size
         }

@@ -56,6 +56,7 @@ class RmTracker(Node):
         self.declare_parameter('ekf_QR_q_r', 800.0)             # EKF QR 参数 - 过程噪声 Q 半径的噪声系数 (s2qr)
         self.declare_parameter('ekf_QR_r_xyz_factor', 0.05)     # EKF QR 参数 - 观测噪声 R 位置观测的动态噪声系数 (距离 * factor)
         self.declare_parameter('ekf_QR_r_yaw', 0.02)            # EKF QR 参数 - 观测噪声 R 偏航角观测的固定方差
+        self.declare_parameter('ekf_QR_stable_dist', 1.5)       
         self.declare_parameter('radius_r1', 0.26)               # 旋转半径参数 - r1 (默认一长一短)
         self.declare_parameter('radius_r2', 0.26)               # 旋转半径参数 - r2
         self.declare_parameter('radius_r_max', 0.4)             # 旋转半径参数 - r_max
@@ -99,12 +100,14 @@ class RmTracker(Node):
         ekf_q_r = self.get_parameter('ekf_QR_q_r').value                    # Process Noise Q: Radius
         ekf_r_xyz_factor = self.get_parameter('ekf_QR_r_xyz_factor').value  # Measurement Noise R: XYZ Factor
         ekf_r_yaw = self.get_parameter('ekf_QR_r_yaw').value                # Measurement Noise R: Yaw
+        ekf_stable_dist = self.get_parameter('ekf_QR_stable_dist').value
         QR_params = {
             'q_xyz': ekf_q_xyz,
             'q_yaw': ekf_q_yaw,
             'q_r': ekf_q_r,
             'r_xyz_factor': ekf_r_xyz_factor,
-            'r_yaw': ekf_r_yaw
+            'r_yaw': ekf_r_yaw,
+            'stable_dist': ekf_stable_dist
         }
         # [旋转半径参数]
         radius_r1 = self.get_parameter('radius_r1').value
@@ -349,6 +352,11 @@ class RmTracker(Node):
                 elif name == 'ekf_QR_r_yaw':
                     if self.is_changed(self.tracker.ekf_QR_params['r_yaw'], value):
                         self.tracker.ekf_QR_params['r_yaw'] = value
+                        reset_required = True
+
+                elif name == 'ekf_QR_stable_dist':
+                    if self.is_changed(self.tracker.ekf_QR_params['stable_dist'], value):
+                        self.tracker.ekf_QR_params['stable_dist'] = value
                         reset_required = True
 
                 # 小陀螺判断

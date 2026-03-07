@@ -7,7 +7,7 @@ rm_tracker:
 
     # 陀螺仪到相机 (IMU -> Cam) 旋转标定
     rotation_rpy_r: 0.0
-    rotation_rpy_p: 0.0
+    rotation_rpy_p: 7.0
     rotation_rpy_y: -180.0
 
     show_rpy: false             # 是否打印 IMU 调试信息
@@ -40,6 +40,8 @@ rm_tracker:
 
     ekf_QR_r_xyz_factor: 0.005   # Measurement Noise R: 位置因子
     ekf_QR_r_yaw: 0.02          # Measurement Noise R: 角度方差
+
+    ekf_QR_stable_dist: 1.5
 
     # [车辆物理参数]
     radius_r1: 0.26             # 车辆半径 1 (m)
