@@ -12,6 +12,7 @@ rm_tracker:
 
     show_rpy: false             # 是否打印 IMU 调试信息
     debug: false
+    display_fps_limit: true 
     display: false           # 是否显示 OpenCV 调试图像
 
     # ----------------------- TRACKER ---------------------

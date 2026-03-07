@@ -1,8 +1,8 @@
 # ros2 功能包
 import rclpy
 from rclpy.node import Node
-# 文件顶部补充导入
 from rclpy.time import Time
+from rclpy.qos import qos_profile_sensor_data   # <--- 新增这一行
 # 自己写的日志管理器
 from .modules.logger import LogThrottler                         # 日志节流
 # 各种消息类型
@@ -37,6 +37,7 @@ class RmTracker(Node):
         self.declare_parameter('show_rpy', False)               # 陀螺仪调试 - 显示原始数据和调整后的数据
         self.declare_parameter('debug', False)                  # 显示调试信息
         self.declare_parameter('text_size', 1.0)                  # 显示文字大小
+        self.declare_parameter('display_fps_limit', True)
         self.declare_parameter('display', False)                # 显示处理结果
         # -----------------------TRACKER---------------------
         self.declare_parameter('target_color', 0)               # 目标敌方阵营 (0: RED, 1: BLUE)
@@ -77,6 +78,7 @@ class RmTracker(Node):
         self.show_rpy = self.get_parameter('show_rpy').value  
         self.debug = self.get_parameter('debug').value          # 陀螺仪调试
         self.text_size = self.get_parameter('text_size').value  # 显示文字大小
+        self.display_fps_limit = self.get_parameter('display_fps_limit').value
         self.display = self.get_parameter('display').value      # 显示处理结果
         # -----------------------TRACKER---------------------
         target_color = self.get_parameter('target_color').value    # 目标敌方阵营
@@ -151,6 +153,9 @@ class RmTracker(Node):
         self.tf = RmTF()
         self.bridge = CvBridge() # 初始化转换器
 
+        # ---------- 新增：图像渲染抽帧控制 ----------
+        self.last_render_time = self.get_clock().now()
+
         # ---------- 优先初始化变量 ----------
         # FPS 计算
         self.process_counter = 0
@@ -206,19 +211,19 @@ class RmTracker(Node):
         self.pub_estimate_img = self.create_publisher(
             Image,
             '/tracker/estimate_img',
-            10
+            qos_profile_sensor_data    # <--- 改用 SensorData QoS，替代原有的 10
         )
 
         self.pub_yaw_debug_img = self.create_publisher(
             Image,
             '/tracker/yaw_debug_img',
-            10
+            qos_profile_sensor_data    # <--- 同上
         )
 
         self.pub_ballistic_img = self.create_publisher(
             Image,
             '/tracker/ballistic_img',
-            10
+            qos_profile_sensor_data    # <--- 同上
         )
 
         self.pub_gimbal_control = self.create_publisher(
@@ -250,6 +255,8 @@ class RmTracker(Node):
                     self.debug = value
                 elif name == 'text_size':
                     self.tracker.text_size = value
+                elif name == 'display_fps_limit':
+                    self.display_fps_limit = value
                 elif name == 'display':
                     self.display = value
 
@@ -534,11 +541,24 @@ class RmTracker(Node):
         # 性能开关：如果没开启显示，直接不处理图像，节省 CPU
         if not self.display:
             return
+
+        # --- 新增：抽帧降频逻辑 ---
+        current_time = self.get_clock().now()
+        dt = (current_time - self.last_render_time).nanoseconds / 1e9
+        
+        # 如果距离上次渲染时间不足 1/30 秒，直接跳过，释放 CPU 给追踪线程
+        if dt < (1.0 / 30.0) and self.display_fps_limit:
+            return
+            
+        self.last_render_time = current_time
+        # --------------------------
+
         # 1. 极速获取当前快照并释放锁
         with self.render_lock:
             if self.render_snapshot is None:
                 return
             current_snapshot = self.render_snapshot
+            
         try:
             # ROS Image -> OpenCV
             cv_img = self.bridge.imgmsg_to_cv2(msg, "bgr8")
@@ -546,7 +566,6 @@ class RmTracker(Node):
             # 核心绘制逻辑
             if self.imu_rpy is not None and self.tf.has_camera_info:
                 # 2. 完全无锁渲染：将快照传入新的 display 函数
-                # 【移除】了 with self.tracker_lock:，并加上了 current_snapshot
                 ballistic_img, estimate_img, yaw_debug_img = self.tracker.display_with_snapshot(
                     current_snapshot,
                     self.debug,
