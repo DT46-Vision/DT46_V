@@ -223,7 +223,7 @@ class Tracker:
         self.dz = 0.0
         self.another_r = self.radius_params['r2']
         
-        self.target_state = self.ekf.X
+        self.target_state = self.ekf.X.copy()
 
         # 【新增】必须将 tracker 的记忆同步为 EKF 内部最终确定的 yaw，防止下一帧计算偏差发散
         self.last_yaw = self.ekf.X[6]
@@ -330,7 +330,7 @@ class Tracker:
             self._log("warn", f"[Tracker] {self.c.RED}Jump Error too large, Adjusted Center Position!{self.c.RESET}")
 
         # 同步状态到 EKF
-        self.ekf.X = self.target_state
+        self.ekf.X = self.target_state.copy()
 
         # ================== 协方差软重置 ==================
         # 适度放大位置和角度的方差，让滤波器在跳变后几帧稍微更信任观测
@@ -346,10 +346,10 @@ class Tracker:
         armors: 已经 process_armors 处理过的 Armor 对象列表 (World Frame)
         """
         # 1. EKF 预测
-        ekf_prediction = self.ekf.predict(dt)
+        ekf_prediction = self.ekf.predict(dt).copy()
 
         # 默认目标状态为预测值
-        self.target_state = ekf_prediction
+        self.target_state = ekf_prediction.copy()
 
         matched = False
 
@@ -433,14 +433,17 @@ class Tracker:
             self.ekf.X[8] = self.radius_params['r_max']
         # [新增] 清洗异常数值并钳制物理速度 (假设最大车速不超过 15 m/s)
         self.target_state = np.nan_to_num(self.target_state, nan=0.0, posinf=100.0, neginf=-100.0)
+        
         self.target_state[1] = np.clip(self.target_state[1], -15.0, 15.0)  # v_xc
         self.target_state[3] = np.clip(self.target_state[3], -15.0, 15.0)  # v_yc
-
+        
         # 地面机器人的 Z 轴运动主要是悬挂起伏和地形变化，不可能达到 15m/s
         # 限制在 [-2.0, 2.0] m/s 足以应对一般的坡道和颠簸，防止状态炸裂
         self.target_state[5] = np.clip(self.target_state[5], -2.0, 2.0)    # v_za
         # ============================================
-        self.ekf.X = self.target_state
+        
+        # 塞回给 EKF 时，再次确保是一块干净的独立内存
+        self.ekf.X = self.target_state.copy()
 
         # 3. 状态机流转 (State Machine)
         if self.tracker_state == self.DETECTING:

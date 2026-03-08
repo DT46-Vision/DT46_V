@@ -22,7 +22,7 @@ def _fast_ekf_update(X, P, H, R, Y, I):
     
     # 自由度为 4 (x, y, z, yaw) 的卡方分布，99% 置信区间的临界值约为 13.28
     # 如果马氏距离平方大于该阈值，判定为野值，直接拒绝更新，返回纯预测值
-    if mahalanobis_sq > 15.0: 
+    if mahalanobis_sq > 30.0: 
         # 【关键修复】必须返回 .copy()，保证返回的数组内存布局与新建数组一致
         # 防止 Numba 因内存特征变化而每一帧都在疯狂重编译
         return X.copy(), P.copy()
@@ -134,7 +134,11 @@ class ExtendedKalmanFilter:
         self.X[:] = [xc, 0.0, yc, 0.0, za, 0.0, yaw, 0.0, r0]
 
         self.P.fill(0.0)
-        np.fill_diagonal(self.P, 1.0)
+        # 位置和角度、半径，初始方差给 1.0 即可
+        self.P[0,0] = 1.0; self.P[2,2] = 1.0; self.P[4,4] = 1.0; self.P[6,6] = 1.0; self.P[8,8] = 1.0
+        
+        # 速度分量盲猜为0，因此方差必须给大 (例如 50.0)，允许 EKF 在前几帧剧烈抖动以迅速收敛出真实车速
+        self.P[1,1] = 50.0; self.P[3,3] = 50.0; self.P[5,5] = 10.0; self.P[7,7] = 50.0
 
     def predict(self, dt):
         """
