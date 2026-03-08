@@ -178,34 +178,34 @@ class RmTracker(Node):
             Vector3Stamped,
             '/imu/rpy',
             self.imu_rpy_cb,
-            1
+            qos_profile_sensor_data
         )
         self.sub_armors = self.create_subscription(
             ArmorsMsg,
             '/detector/armors_info',
             self.armors_cb,
-            1
+            qos_profile_sensor_data
         )
 
         self.sub_caminfo = self.create_subscription(
             CameraInfo,
             "/camera_info",
             self.camera_info_cb,
-            10
+            qos_profile_sensor_data
         )
 
         self.sub_opponent_color = self.create_subscription(
             Decision,
             '/nav/decision',
             self.cb_opponent_color,
-            10
+            qos_profile_sensor_data
         )
 
         self.sub_raw_img = self.create_subscription(
             Image,
             '/image_raw',
             self.res_img_cb,
-            10
+            qos_profile_sensor_data
         )
 
         self.pub_estimate_img = self.create_publisher(
@@ -229,7 +229,7 @@ class RmTracker(Node):
         self.pub_gimbal_control = self.create_publisher(
             GimbalControl,
             '/tracker/gimbal_control',
-            10
+            qos_profile_sensor_data
         )
 
     def is_changed(self, old_val, new_val, tol=1e-5):

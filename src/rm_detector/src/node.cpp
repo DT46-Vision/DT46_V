@@ -113,12 +113,15 @@ namespace DT46_VISION {
             sub_camera_info_ = this->create_subscription<sensor_msgs::msg::CameraInfo>(
                 "/camera_info", 10, std::bind(&ArmorDetectorNode::camera_info_callback, this, std::placeholders::_1));
 
-            publisher_armors_     = this->create_publisher<rm_interfaces::msg::ArmorsMsg>("/detector/armors_info", 10);
-            publisher_result_img_ = this->create_publisher<sensor_msgs::msg::Image>("/detector/result", 10);
-            publisher_crop_img_    = this->create_publisher<sensor_msgs::msg::Image>("/detector/crop_img", 10);
-            publisher_bin_img_    = this->create_publisher<sensor_msgs::msg::Image>("/detector/bin_img", 10);
-            publisher_armor_img_  = this->create_publisher<sensor_msgs::msg::Image>("/detector/img_armor", 10);
-            publisher_armor_processed_img_  = this->create_publisher<sensor_msgs::msg::Image>("/detector/img_armor_processed", 10);
+            // 【修改点】将装甲板坐标的发布策略改为 SensorDataQoS，消除底层的缓冲队列延迟
+            publisher_armors_     = this->create_publisher<rm_interfaces::msg::ArmorsMsg>("/detector/armors_info", sensor_qos);
+            
+            // （可选优化）如果是比赛实战，建议把下面这些 debug 图像的发布也都改成 sensor_qos，防止因为图像推流挤占网卡带宽导致卡顿
+            publisher_result_img_ = this->create_publisher<sensor_msgs::msg::Image>("/detector/result", sensor_qos);
+            publisher_crop_img_   = this->create_publisher<sensor_msgs::msg::Image>("/detector/crop_img", sensor_qos);
+            publisher_bin_img_    = this->create_publisher<sensor_msgs::msg::Image>("/detector/bin_img", sensor_qos);
+            publisher_armor_img_  = this->create_publisher<sensor_msgs::msg::Image>("/detector/img_armor", sensor_qos);
+            publisher_armor_processed_img_  = this->create_publisher<sensor_msgs::msg::Image>("/detector/img_armor_processed", sensor_qos);
 
             // 工作线程detect_color_
             running_.store(true);

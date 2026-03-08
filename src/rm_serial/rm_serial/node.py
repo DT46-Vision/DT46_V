@@ -8,7 +8,7 @@ from rclpy.node import Node
 from std_msgs.msg import Header
 from rm_interfaces.msg import GimbalControl, Decision
 from geometry_msgs.msg import Vector3Stamped
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy, qos_profile_sensor_data
 
 class ColorPrint():
     def __init__(self):
@@ -29,11 +29,10 @@ class RMSerialDriver(Node):
 
         # 创建订阅者
         self.sub_gimbal_control = self.create_subscription(
-            GimbalControl, "/tracker/gimbal_control", self.send_data, 10
-        )
+            GimbalControl, "/tracker/gimbal_control", self.send_data, qos_profile_sensor_data)
 
         # 创建发布者 1: 决策信息
-        self.pub_uart_receive_decision = self.create_publisher(Decision, "/nav/decision", 10)
+        self.pub_uart_receive_decision = self.create_publisher(Decision, "/nav/decision", qos_profile_sensor_data)
 
         # ---------- QoS ----------
         # IMU 数据通常需要高实时性，Volatile 是正确的选择

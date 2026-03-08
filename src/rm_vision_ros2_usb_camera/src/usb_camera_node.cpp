@@ -69,7 +69,6 @@ public:
         // 打开相机
         if (web_cam_) {
             RCLCPP_INFO(this->get_logger(), "使用 Web Camera: %s", web_cam_url_.c_str());
-            cap_.open(web_cam_url_);
         } else {
             RCLCPP_INFO(this->get_logger(), "使用 USB Camera");
             cap_.open(camera_index_, cv::CAP_V4L2);
@@ -99,15 +98,16 @@ public:
         apply_gain();
 
         // 发布图像 & camera_info
-        image_pub_ = this->create_publisher<sensor_msgs::msg::Image>("image_raw", 10);
-        cinfo_pub_ = this->create_publisher<sensor_msgs::msg::CameraInfo>("camera_info", 10);
-
-        // 定时器：按 fps 定时抓取图像
-        create_timer();
+        auto sensor_qos = rclcpp::SensorDataQoS();
+        image_pub_ = this->create_publisher<sensor_msgs::msg::Image>("image_raw", sensor_qos);
+        cinfo_pub_ = this->create_publisher<sensor_msgs::msg::CameraInfo>("camera_info", sensor_qos);
 
         // 注册动态参数回调
         callback_handle_ = this->add_on_set_parameters_callback(
             std::bind(&USBCameraNode::parameters_callback, this, std::placeholders::_1));
+
+        // 启动独立采帧线程 (替换掉旧的 create_timer)
+        capture_thread_ = std::thread(&USBCameraNode::capture_loop, this);
 
         RCLCPP_INFO(this->get_logger(),
             "相机确认工作参数: %dx%d @ %.2f FPS, 格式: %s, 曝光: %s, 增益: %d",
@@ -115,6 +115,19 @@ public:
             pixel_format_.c_str(),
             exposure_auto_ ? "自动" : "手动",
             gain_);
+    }
+
+    // 新增：析构函数，用于安全释放线程和相机资源
+    ~USBCameraNode() override
+    {
+        running_ = false;
+        if (capture_thread_.joinable()) {
+            capture_thread_.join();
+        }
+        if (cap_.isOpened()) {
+            cap_.release();
+        }
+        RCLCPP_INFO(this->get_logger(), "USB 相机节点已安全退出");
     }
 
 private:
@@ -290,7 +303,6 @@ private:
                         "请求 fps=%.2f 不支持，回退到 %.2f", req_fps, actual);
                 }
                 fps_ = actual;
-                create_timer();
                 RCLCPP_INFO(this->get_logger(), "更新 fps = %.2f", fps_);
             }
             else if (param.get_name() == "exposure_auto") {
@@ -336,41 +348,39 @@ private:
             prefix.c_str(), (int)rw, (int)rh, rfps, fourcc_str);
     }
 
-    // ========== 采帧 ==========
-    void capture_frame()
+    // ========== 独立线程死循环采帧 ==========
+    void capture_loop()
     {
-        cv::Mat frame;
-        if (!cap_.read(frame)) {
-            RCLCPP_WARN(this->get_logger(), "捕获帧失败 (Frame Dropped or Timeout)");
-            return;
+        while (rclcpp::ok() && running_.load()) {
+            cv::Mat frame;
+            
+            // cap_.read() 是底层的阻塞调用
+            // 只要硬件缓冲区有一帧新图像，就会立刻返回，保证零延迟
+            if (!cap_.read(frame)) {
+                RCLCPP_WARN(this->get_logger(), "捕获帧失败 (Frame Dropped or Timeout)");
+                continue;  // 失败不退出，继续尝试下一帧
+            }
+
+            auto stamp = this->now();
+            std_msgs::msg::Header header;
+            header.stamp = stamp;
+            header.frame_id = "camera_optical_frame";
+
+            // 图像格式转换与标记修正
+            std::string target_encoding = "bgr8";
+            if (encoding_str_ == "rgb8") {
+                cv::cvtColor(frame, frame, cv::COLOR_BGR2RGB);
+                target_encoding = "rgb8";
+            }
+            
+            auto img_msg = cv_bridge::CvImage(header, target_encoding, frame).toImageMsg();
+            image_pub_->publish(*img_msg);
+
+            // 发布 Camera Info
+            auto ci = cinfo_mgr_->getCameraInfo();
+            ci.header = header;
+            cinfo_pub_->publish(ci);
         }
-
-        auto stamp = this->now();
-        std_msgs::msg::Header header;
-        header.stamp = stamp;
-        header.frame_id = "camera_optical_frame";
-        // 将 OpenCV 图像转换为 ROS 消息
-        // 切换颜色通道强转为 BGR
-        if (encoding_str_ == "rgb8"){
-            cv::cvtColor(frame, frame, cv::COLOR_BGR2RGB);
-        }
-        // 2. 统一转换
-        auto img_msg = cv_bridge::CvImage(header, "bgr8", frame).toImageMsg();
-        image_pub_->publish(*img_msg);
-
-        // 发布 Camera Info
-        auto ci = cinfo_mgr_->getCameraInfo();
-        ci.header = header;
-        cinfo_pub_->publish(ci);
-    }
-
-    // ========== 定时器管理 ==========
-    void create_timer()
-    {
-        // 避免除以零
-        if (fps_ <= 0.0) fps_ = 30.0;
-        auto period = std::chrono::milliseconds(static_cast<int>(1000.0 / fps_));
-        timer_ = this->create_wall_timer(period, std::bind(&USBCameraNode::capture_frame, this));
     }
 
     // 成员
@@ -378,7 +388,6 @@ private:
     rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr image_pub_;
     rclcpp::Publisher<sensor_msgs::msg::CameraInfo>::SharedPtr cinfo_pub_;
     std::shared_ptr<camera_info_manager::CameraInfoManager> cinfo_mgr_;
-    rclcpp::TimerBase::SharedPtr timer_;
     rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr callback_handle_;
 
     int camera_index_;
@@ -393,7 +402,9 @@ private:
     // [新增]
     std::string pixel_format_;
     std::string encoding_str_;
-
+    // 新增：独立线程与控制标志
+    std::thread capture_thread_;
+    std::atomic<bool> running_{true};
     bool web_cam_;
     std::string web_cam_url_;
 };
