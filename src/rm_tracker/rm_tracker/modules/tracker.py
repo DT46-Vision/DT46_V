@@ -114,11 +114,6 @@ class Tracker:
         # 如果卡顿超过此时间，宁可让滤波器认为时间流逝得慢，也不能让 Q 矩阵爆炸
         dt = max(0.001, min(duration, 0.03))
 
-        # 【删除原有的平滑逻辑】
-        # if hasattr(self, 'prev_dt'):
-        #     dt = 0.8 * dt + 0.2 * self.prev_dt
-        # self.prev_dt = dt
-
         self.last_time = current_ros_time
         return dt
 
@@ -227,8 +222,12 @@ class Tracker:
         # 初始化物理参数
         self.dz = 0.0
         self.another_r = self.radius_params['r2']
-
+        
         self.target_state = self.ekf.X
+
+        # 【新增】必须将 tracker 的记忆同步为 EKF 内部最终确定的 yaw，防止下一帧计算偏差发散
+        self.last_yaw = self.ekf.X[6]
+    
         # 【修改】 print -> _log
         self._log("sys", f"[Tracker] {self.c.GREEN}Init EKF with ID {self.c.CYAN}{armor.id}{self.c.RESET}")
 
@@ -321,7 +320,8 @@ class Tracker:
             # 模长判断
             if (current_p[0]**2 + current_p[1]**2) > (test_xc**2 + test_yc**2):
                 # 如果法向量反了，同样翻转 yaw
-                yaw = self.orientation_to_yaw(current_armor.yaw + np.pi)
+                yaw += np.pi
+                self.last_yaw = yaw
                 self.target_state[6] = yaw  # 同步更新状态机里的 yaw
 
             self.target_state[0] = current_p[0] + r * np.cos(yaw)
@@ -537,11 +537,13 @@ class Tracker:
             # 小陀螺模式：“打半边”策略
             same_side = []
             for armor in robot_armors:
-                if self.ekf.X[7] > 0:
-                    if armor.yaw > 0:
+                # 必须先归一化角度
+                norm_yaw = normalize_angle(armor.yaw)
+                if self.ekf.X[7] >= 0:
+                    if norm_yaw >= 0:
                         same_side.append(armor)
                 else:
-                    if armor.yaw < 0:
+                    if norm_yaw < 0:
                         same_side.append(armor)
 
             for armor in same_side:
@@ -574,7 +576,47 @@ class Tracker:
 
         return best_armor
 
-    def world_to_muzzle(self, target, offset_pos, tf, imu_rpy):
+    def predict_target_future(self, target):
+        """
+        动态提前量预测 (Lead Prediction)
+        利用 EKF 速度状态推算子弹到达时装甲板的未来世界坐标
+        """
+        if target is None or self.bullet_speed < 1e-3:
+            return target
+
+        # 1. 粗算子弹飞行时间 t (距离 / 弹速)
+        rough_dist = np.linalg.norm(target.pos)
+        fly_time = rough_dist / self.bullet_speed
+
+        # 2. 系统发弹与通信延迟 (可根据实际电控响应调整，通常 0.05~0.1 秒)
+        system_delay = 0.05 
+        total_pred_time = fly_time + system_delay
+
+        # 3. 提取 EKF 里的速度状态
+        x = self.ekf.X
+        v_xc, v_yc, v_za = x[1], x[3], x[5]
+        v_yaw = x[7]
+
+        # 4. 预测 total_pred_time 之后的车体中心和角度
+        pred_xc = x[0] + v_xc * total_pred_time
+        pred_yc = x[2] + v_yc * total_pred_time
+        pred_za = x[4] + v_za * total_pred_time
+        pred_yaw = x[6] + v_yaw * total_pred_time
+
+        # 5. 根据预测的车体状态，重新推算这块目标装甲板在未来的世界坐标
+        r = x[8] if target.index % 2 == 0 else self.another_r
+        z_offset = 0.0 if target.index % 2 == 0 else self.dz
+        
+        future_yaw = pred_yaw - target.index * (math.pi / 2.0)
+        
+        # 覆写当前目标的坐标
+        target.pos[0] = pred_xc - r * math.cos(future_yaw)
+        target.pos[1] = pred_yc - r * math.sin(future_yaw)
+        target.pos[2] = pred_za + z_offset
+
+        return target
+
+    def world_to_muzzle(self, tf, target, offset_pos, imu_rpy):
         """
         将目标坐标从 [相对于相机] 转换为 [相对于枪口]
 
@@ -606,82 +648,56 @@ class Tracker:
 
         return muzzle_target
 
-    def solve_ballistic(self, muzzle_target, cam_to_gun_rpy, imu_rpy):
+    def solve_ballistic(self, tf, muzzle_target, cam_to_gun_rpy, imu_rpy):
         """
-        全向弹道解算 (Iterative Method)
-
-        Args:
-            muzzle_target:  Armor对象 (世界坐标，原点在枪口)
-            cam_to_gun_rpy: [roll, pitch, yaw] 机械安装误差/静态补偿 (单位: 度)
-            imu_rpy:        [roll, pitch, yaw] 当前云台姿态 (单位: 度)
+        基于当前位姿逆解的弹道解算 (Iterative Method)
         """
-        # 使用 self.bullet_speed 读取类成员变量，避免参数传错
         bullet_speed = self.bullet_speed
 
         if muzzle_target is None or bullet_speed < 1e-3:
             return [0.0, 0.0, False]
 
-        # 1. 提取坐标
+        # 1. 提取惯性系坐标 (原点在枪口，XYZ轴与世界系平行)
         x, y, z = muzzle_target.pos
-        dist_h = math.sqrt(x**2 + y**2) # 水平距离
+        dist_h = math.sqrt(x**2 + y**2)
 
-        # 增加防爆护盾：距离太近、超过 25 米、或是 NaN 时直接放弃解算
         if dist_h < 0.1 or dist_h > 12.0 or math.isnan(dist_h):
             return [0.0, 0.0, False]
 
-        if dist_h < 0.1:
-            return [0.0, 0.0, False]
-
-        # 2. 物理参数
         g = 9.81
         v = bullet_speed
-        k = 0.035  # 空气阻力系数
+        k = 0.035
 
-        # 3. 迭代求解【物理】绝对 Pitch 角度
-        # 目标是找到一个 theta，使得子弹的抛物线经过 (dist_h, z)
-
-        # 初始猜测
+        # 2. 迭代求解补偿重力后的高度 (完全在物理惯性系下计算)
         target_pitch_rad = math.atan2(z, dist_h)
-
-        # 迭代求解 (补偿重力下坠 + 空气阻力)
         for i in range(5):
             cos_theta = math.cos(target_pitch_rad)
             if cos_theta < 1e-4: cos_theta = 1e-4
 
-            # 计算飞行时间 t
             if k > 1e-5:
                 t = (math.exp(k * dist_h) - 1) / (k * v * cos_theta)
             else:
                 t = dist_h / (v * cos_theta)
 
-            # 计算下坠补偿量
             y_drop = 0.5 * g * t**2
-
-            # 更新目标角度
             z_aim = z + y_drop
             target_pitch_rad = math.atan2(z_aim, dist_h)
 
-        # 4. 计算 Yaw (几何角度)
-        target_yaw_rad = math.atan2(y, x)
+        # 3. 构造补偿重力后的“虚拟瞄准点” (惯性系坐标)
+        aim_point_world = np.array([x, y, z_aim])
 
-        # 5. 加上【机械补偿】 (cam_to_gun_rpy)
-        # 这一步不能少，用于修正枪管和相机的固有偏差
-        offset_pitch_rad = cam_to_gun_rpy[1] * DEG2RAD
-        offset_yaw_rad   = cam_to_gun_rpy[2] * DEG2RAD
+        # 4. 【核心逻辑】直接调用你的辅助函数，逆解回当前的相机坐标系
+        aim_point_cam = self.world_to_cam(tf, aim_point_world, imu_rpy)
 
-        final_target_pitch = target_pitch_rad + offset_pitch_rad
-        final_target_yaw   = target_yaw_rad + offset_yaw_rad
+        # 5. 在相机坐标系下直接求取角度增量 (Delta)
+        # 相机系标准定义：Z轴向前，X轴向右，Y轴向下
+        # 计算所需的偏航和俯仰增量 (可根据云台电机的正负极性在此处加负号)
+        delta_yaw = math.atan2(aim_point_cam[0], aim_point_cam[2])
+        delta_pitch = math.atan2(aim_point_cam[1], aim_point_cam[2])
 
-        # 6. 计算电控控制增量 (Delta)
-        current_pitch_rad = imu_rpy[1] * DEG2RAD
-        current_yaw_rad   = imu_rpy[2] * DEG2RAD
-
-        # 【Yaw】 使用最短路径差值
-        delta_yaw = shortest_angular_distance(current_yaw_rad, final_target_yaw)
-
-        # 【Pitch】 根据你的实测，你的 IMU 定义是反的，所以这里用加法
-        # (即: 目标角度 + 当前负角度 = 偏差)
-        delta_pitch = final_target_pitch + current_pitch_rad
+        # 6. 加上机械安装补偿 (修正枪管与相机的固有静态偏差)
+        delta_yaw += cam_to_gun_rpy[2] * DEG2RAD
+        delta_pitch += cam_to_gun_rpy[1] * DEG2RAD
 
         return [delta_yaw, delta_pitch, True]
 
@@ -694,8 +710,8 @@ class Tracker:
         can_fire: bool
         """
         yaw, pitch = gimbal_control[0], gimbal_control[1]
-        if abs(yaw) < self.yaw_threshold_deg and abs(pitch) < self.pitch_threshold_deg:
-            gimbal_control[2] = True
+        gimbal_control[2] = (abs(yaw) < self.yaw_threshold_deg and abs(pitch) < self.pitch_threshold_deg)
+
         return gimbal_control
 
     def track(self, tf, msg, imu_rpy, ros_clock):
@@ -710,6 +726,8 @@ class Tracker:
         # 【新增】每帧开始前清空日志 buffer
         self.log_buffer = []
 
+        gimbal_control = [0.0, 0.0, False]
+
         # 1. 更新时间步长
         dt = self.update_dt(ros_clock)
         self.dt = dt
@@ -722,7 +740,7 @@ class Tracker:
             # 如果丢失，尝试初始化
             self.try_init_tracker(armors)
             # LOST 状态下返回空结果 (0, 0, False)，但带上日志
-            return [0.0, 0.0, False], self.log_buffer
+            return gimbal_control, self.log_buffer
         else:
             # 如果正在追踪 (DETECTING / TRACKING / TEMP_LOST)
             # 运行核心更新逻辑 (EKF Predict -> Match -> EKF Update)
@@ -732,7 +750,7 @@ class Tracker:
         if self.tracker_state == self.LOST:
             # 如果 update 导致丢失，也要返回空
             self.tracked_id = None
-            return [0.0, 0.0, False], self.log_buffer
+            return gimbal_control, self.log_buffer
 
         # 5. 生成虚拟装甲板并选敌
         robot_armors = self.find_all_armors()
@@ -740,13 +758,12 @@ class Tracker:
         # 【步骤A】 找出最佳目标（这是相机系坐标！）
         target_cam = self.find_target(robot_armors)
 
-        # =================【核心：只打半边/开火窗口逻辑】=================
-        gimbal_control = [0.0, 0.0, False]
-
         if target_cam is not None:
+            # 【预测】引入提前量，直接更新目标坐标
+            target_cam = self.predict_target_future(target_cam)
             # 【步骤B】 转换到枪口系，专门用于解算弹道
-            target_muzzle = self.world_to_muzzle(target_cam, self.cam_to_gun_pos, tf, imu_rpy)
-            gimbal_control = self.solve_ballistic(target_muzzle, self.cam_to_gun_rpy, imu_rpy)
+            target_muzzle = self.world_to_muzzle(tf, target_cam, self.cam_to_gun_pos, imu_rpy)
+            gimbal_control = self.solve_ballistic(tf, target_muzzle, self.cam_to_gun_rpy, imu_rpy)
             gimbal_control = self.gimbal_to_deg(gimbal_control)
             gimbal_control = self.can_fire(gimbal_control)
             self.gimbal_control = gimbal_control

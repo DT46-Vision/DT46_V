@@ -7,7 +7,7 @@ rm_tracker:
 
     # 陀螺仪到相机 (IMU -> Cam) 旋转标定
     rotation_rpy_r: 0.0
-    rotation_rpy_p: 7.0
+    rotation_rpy_p: 0.0
     rotation_rpy_y: -180.0
 
     show_rpy: false             # 是否打印 IMU 调试信息

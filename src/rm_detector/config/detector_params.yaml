@@ -7,8 +7,8 @@ rm_detector:
     light_h_w_ratio: 2.0
     light_angle_min: -35
     light_angle_max: 35
-    light_red_ratio: 1.0
-    light_blue_ratio: 1.0
+    light_red_ratio: 2.0
+    light_blue_ratio: 2.0
 
     # ---- 装甲板匹配参数 ----
     height_rate_tol: 1.8

@@ -24,13 +24,8 @@ def generate_launch_description():
 
     # ---------------- rqt 界面配置 ----------------
     perspective_file = os.path.expanduser(
-        "~/ros_vision/Kielas_Vision.perspective"
+        "~/DT46_V/Kielas_Vision.perspective"
     )
-
-    # # ---------------- rqt 界面配置 ----------------
-    # rviz_file = os.path.expanduser(
-    #     "~/ros_vision/Kielas_Vision.rviz"
-    # )
 
     return LaunchDescription([
         # ----------- 可配置的 launch 参数 -----------

@@ -120,7 +120,7 @@ class RMSerialDriver(Node):
                             rpy_msg.header.stamp = self.get_clock().now().to_msg()
                             rpy_msg.header.frame_id = 'imu_link'
                             rpy_msg.vector.x = float(roll)
-                            rpy_msg.vector.y = float(-pitch)
+                            rpy_msg.vector.y = float(pitch)
                             rpy_msg.vector.z = float(yaw)
                             self.pub_uart_receive_imu.publish(rpy_msg)
 
