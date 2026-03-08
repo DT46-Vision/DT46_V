@@ -67,6 +67,8 @@ class Tracker:
         self.dist_tol = 0.15                                # [预处理] 同一装甲板不同观测点的距离容差 (防止误判)
         self.max_match_distance = 0.2                       # [匹配] EKF 预测值与观测值的最大欧氏距离阈值 (m)
         self.max_match_yaw_diff = 1.0                       # [匹配] 判定装甲板切换 (Armor Jump) 的 Yaw 角度差阈值 (rad)
+        self.jump_cooldown = 0         # [新增] 跳变冷却帧数计数器
+        self.jump_cooldown_max = 10    # [新增] 发生跳变后，10帧内拒绝再次跳变
         self.tracking_thres = 5                             # 进入 TRACKING 状态所需的连续检测帧数
         self.lost_thres = 10                                # 进入 LOST 状态所需的连续丢失帧数
         self.tracker_state = self.LOST                      # 跟踪器 FSM 当前状态 (LOST/DETECTING/TRACKING/TEMP_LOST)
@@ -345,6 +347,9 @@ class Tracker:
         """
         armors: 已经 process_armors 处理过的 Armor 对象列表 (World Frame)
         """
+        # [新增] 冷却期递减
+        if self.jump_cooldown > 0:
+            self.jump_cooldown -= 1
         # 1. EKF 预测
         ekf_prediction = self.ekf.predict(dt).copy()
 
@@ -354,9 +359,6 @@ class Tracker:
         matched = False
 
         if len(armors) > 0:
-            # # 寻找同 ID 且距离最近的装甲板
-            # same_id_armor = None
-            # same_id_count = 0
 
             min_position_diff = float('inf')
             yaw_diff = float('inf')
@@ -368,8 +370,6 @@ class Tracker:
 
             for armor in armors:
                 if armor.id == self.tracked_id:
-                    # same_id_armor = armor
-                    # same_id_count += 1
 
                     # 计算距离差
                     p_diff = np.linalg.norm(predicted_armor_pos - armor.pos)
@@ -402,21 +402,22 @@ class Tracker:
 
                 self.target_state = self.ekf.update(measurement)
 
-            # elif same_id_count == 1 and yaw_diff > self.max_match_yaw_diff * DEG2RAD: # 判定为：车转过去了，这是新的一块板子
-                # # 记录跳变处理的耗时
-                # self.handle_armor_jump(same_id_armor)
-                # matched = True # Jump 之后认为匹配成功，但不需要再次 update EKF（因为 handle 里已经重置了）
             elif yaw_diff > self.max_match_yaw_diff * DEG2RAD:
                 # [情况 B]: 角度差异过大，判定为装甲板跳变 (Armor Jump)
-                # 增加防暴走保护：计算新装甲板与车体中心的距离
-                center_diff = np.linalg.norm(predicted_center_pos - self.tracked_armor.pos)
-
-                # 正常步兵/英雄半径在 0.2~0.3m，考虑到运动学误差，0.6m 是一个安全的物理极限
-                if center_diff < 0.6:
-                    self.handle_armor_jump(self.tracked_armor)
-                    matched = True
+                
+                # [新增防跳防抖] 检查是否在冷却期内
+                if self.jump_cooldown > 0:
+                    self._log("debug", f"[Tracker] {self.c.PINK}Jump rejected! Cooldown active: {self.jump_cooldown}{self.c.RESET}")
+                    # 在冷却期内强行出现的离谱角度大概率是 PnP 野值，直接跳过本次更新（走无匹配逻辑）
                 else:
-                    self._log("warn", f"[Tracker] {self.c.RED}Jump rejected! Center diff too large: {center_diff:.3f}m{self.c.RESET}")
+                    center_diff = np.linalg.norm(predicted_center_pos - self.tracked_armor.pos)
+
+                    if center_diff < 0.6:
+                        self.handle_armor_jump(self.tracked_armor)
+                        self.jump_cooldown = self.jump_cooldown_max  # [新增] 触发跳变后，立刻进入冷却
+                        matched = True
+                    else:
+                        self._log("warn", f"[Tracker] {self.c.RED}Jump rejected! Center diff too large: {center_diff:.3f}m{self.c.RESET}")
 
             else:
                 # [情况 C]: 没匹配上
@@ -480,15 +481,44 @@ class Tracker:
                 self.tracker_state = self.TRACKING
                 self.lost_count = 0
                 self._log("state", f"[Tracker] {self.c.GREEN}TEMP_LOST {self.c.PINK}-> {self.c.CYAN}TRACKING{self.c.RESET}")
-    def find_all_armors(self):
+
+    def predict_future_state(self):
         """
-        利用 EKF 状态解算出当前时刻 4 块装甲板的世界坐标
-        返回: List[Armor]
+        基于当前系统状态，预测子弹到达时的车体整体状态 (中心位置 + 整体偏航角)
         """
-        x = self.target_state
-        xc, yc, za = x[0], x[2], x[4]
-        yaw = x[6]
-        r1 = x[8]
+        current_state = self.target_state.copy()
+        if self.bullet_speed < 1e-3:
+            return current_state
+
+        xc, yc, za = current_state[0], current_state[2], current_state[4]
+        v_xc, v_yc, v_za = current_state[1], current_state[3], current_state[5]
+        yaw, v_yaw = current_state[6], current_state[7]
+        r = current_state[8]
+
+        # 1. 计算到车体表面的粗略距离 (中心距离减去装甲板半径)
+        center_dist = math.sqrt(xc**2 + yc**2 + za**2)
+        rough_dist = max(0.1, center_dist - r) 
+
+        # 2. 预测时间 = 飞行时间 + 系统发弹延迟
+        system_delay = 0.05 
+        t = (rough_dist / self.bullet_speed) + system_delay
+
+        # 3. 计算未来状态
+        future_state = current_state.copy()
+        future_state[0] = xc + v_xc * t
+        future_state[2] = yc + v_yc * t
+        future_state[4] = za + v_za * t
+        future_state[6] = yaw + v_yaw * t
+
+        return future_state
+
+    def find_all_armors(self, state):
+        """
+        利用传入的状态向量(未来的整体状态)解算出 4 块装甲板的世界坐标
+        """
+        xc, yc, za = state[0], state[2], state[4]
+        yaw = state[6]
+        r1 = state[8]
         r2 = self.another_r
         dz = self.dz
 
@@ -510,26 +540,28 @@ class Tracker:
 
         return robot_armors
 
-    def find_target(self, robot_armors):
+    def find_target(self, robot_armors, state):
         """
-        选出最佳目标 (Armor 对象)
+        基于预测后的状态选出最佳目标 (Armor 对象)
         """
         best_armor = None
         min_dist = float('inf')
 
-        xc, yc = self.target_state[0], self.target_state[2]
+        # 使用传入的未来状态作为参考中心
+        xc, yc = state[0], state[2]
         yaw_center_to_cam = math.atan2(-yc, -xc)
 
         # ---------------- 状态更新：引入退出防抖 ----------------
+        # 判定防抖依然使用真实观测的角速度 (self.ekf.X[7])
         if abs(self.ekf.X[7]) > self.min_spinning_vel:
             self.min_spinning_frame_count += 1
-            self.spinning_frame_lost_count = 0  # 角速度达标，清空丢失计数
+            self.spinning_frame_lost_count = 0 
             if self.min_spinning_frame_count > self.min_spinning_frame:
                 self.min_spinning_frame_count = 0
                 self.spin = True
         else:
-            self.min_spinning_frame_count = 0  # 角速度未达标，清空进入计数
-            if self.spin:  # 如果当前在小陀螺状态，开始累计丢失帧
+            self.min_spinning_frame_count = 0 
+            if self.spin: 
                 self.spinning_frame_lost_count += 1
                 if self.spinning_frame_lost_count > self.spinning_frame_lost:
                     self.spin = False
@@ -540,7 +572,6 @@ class Tracker:
             # 小陀螺模式：“打半边”策略
             same_side = []
             for armor in robot_armors:
-                # 必须先归一化角度
                 norm_yaw = normalize_angle(armor.yaw)
                 if self.ekf.X[7] >= 0:
                     if norm_yaw >= 0:
@@ -561,63 +592,21 @@ class Tracker:
         else:
             # 非小陀螺模式：候选前二，选夹角最小（最正对）
             sorted_armors = sorted(robot_armors, key=lambda armor: np.linalg.norm(armor.pos))
-            candidate_armors = sorted_armors[:2] # 候选前两块装甲板
+            candidate_armors = sorted_armors[:2] 
 
-            min_angle_diff = float('inf') # 用于筛选最正对的板子
+            min_angle_diff = float('inf') 
 
             for armor in candidate_armors:
                 yaw_center_to_armor = math.atan2(armor.pos[1] - yc, armor.pos[0] - xc)
                 angle_diff = abs(shortest_angular_distance(yaw_center_to_cam, yaw_center_to_armor))
                 armor.angle_diff = angle_diff
 
-                # 比较角度差，越小越正对
                 if angle_diff < min_angle_diff:
                     min_angle_diff = angle_diff
                     best_armor = armor
 
         self.target = best_armor
-
         return best_armor
-
-    def predict_target_future(self, target):
-        """
-        动态提前量预测 (Lead Prediction)
-        利用 EKF 速度状态推算子弹到达时装甲板的未来世界坐标
-        """
-        if target is None or self.bullet_speed < 1e-3:
-            return target
-
-        # 1. 粗算子弹飞行时间 t (距离 / 弹速)
-        rough_dist = np.linalg.norm(target.pos)
-        fly_time = rough_dist / self.bullet_speed
-
-        # 2. 系统发弹与通信延迟 (可根据实际电控响应调整，通常 0.05~0.1 秒)
-        system_delay = 0.05 
-        total_pred_time = fly_time + system_delay
-
-        # 3. 提取 EKF 里的速度状态
-        x = self.ekf.X
-        v_xc, v_yc, v_za = x[1], x[3], x[5]
-        v_yaw = x[7]
-
-        # 4. 预测 total_pred_time 之后的车体中心和角度
-        pred_xc = x[0] + v_xc * total_pred_time
-        pred_yc = x[2] + v_yc * total_pred_time
-        pred_za = x[4] + v_za * total_pred_time
-        pred_yaw = x[6] + v_yaw * total_pred_time
-
-        # 5. 根据预测的车体状态，重新推算这块目标装甲板在未来的世界坐标
-        r = x[8] if target.index % 2 == 0 else self.another_r
-        z_offset = 0.0 if target.index % 2 == 0 else self.dz
-        
-        future_yaw = pred_yaw - target.index * (math.pi / 2.0)
-        
-        # 覆写当前目标的坐标
-        target.pos[0] = pred_xc - r * math.cos(future_yaw)
-        target.pos[1] = pred_yc - r * math.sin(future_yaw)
-        target.pos[2] = pred_za + z_offset
-
-        return target
 
     def world_to_muzzle(self, tf, target, offset_pos, imu_rpy):
         """
@@ -755,15 +744,17 @@ class Tracker:
             self.tracked_id = None
             return gimbal_control, self.log_buffer
 
-        # 5. 生成虚拟装甲板并选敌
-        robot_armors = self.find_all_armors()
+        # 5. 整体状态预测与选敌
+        # 先推算子弹到达时车体的整体位姿
+        future_state = self.predict_future_state()
+        
+        # 用未来的位姿生成 4 块装甲板
+        robot_armors = self.find_all_armors(future_state)
 
-        # 【步骤A】 找出最佳目标（这是相机系坐标！）
-        target_cam = self.find_target(robot_armors)
+        # 【步骤A】 在未来分布的装甲板中选出最佳目标
+        target_cam = self.find_target(robot_armors, future_state)
 
         if target_cam is not None:
-            # 【预测】引入提前量，直接更新目标坐标
-            target_cam = self.predict_target_future(target_cam)
             # 【步骤B】 转换到枪口系，专门用于解算弹道
             target_muzzle = self.world_to_muzzle(tf, target_cam, self.cam_to_gun_pos, imu_rpy)
             gimbal_control = self.solve_ballistic(tf, target_muzzle, self.cam_to_gun_rpy, imu_rpy)

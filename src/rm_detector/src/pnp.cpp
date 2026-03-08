@@ -95,7 +95,7 @@ namespace DT46_VISION {
                                     cameraMatrix, distCoeffs,
                                     rvec, tvec,
                                     false,
-                                    cv::SOLVEPNP_IPPE); // 【修正1】换用 SQPNP
+                                    cv::SOLVEPNP_IPPE);
 
         if (!success) {
             RCLCPP_WARN(logger_, "solvePnP失败，无法估计位姿");
