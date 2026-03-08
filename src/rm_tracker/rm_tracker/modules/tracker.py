@@ -58,43 +58,60 @@ class Tracker:
 
     def __init__(self):
         self.c = ColorPrint()
-        self.dt = 0.01
+
         self.target_color = 0                               # 目标敌方阵营 (0: RED, 1: BLUE)
+
         self.cam_to_gun_pos = np.array([0.0, -0.05, 0.0])   # [外参] 相机相对于枪口的平移向量 (x:右, y:下, z:前)
         self.cam_to_gun_rpy = np.array([0.0, 0.0, 0.0])     # [外参] 相机相对于枪口的旋转欧拉角 (Roll, Pitch, Yaw)
+
         self.ekf = ExtendedKalmanFilter()                   # 扩展卡尔曼滤波器 (EKF) 核心实例
+
+        self.dt = 0.01
         self.last_time = None                               # 上一帧的时间戳，用于计算帧间时间差 dt
-        self.dist_tol = 0.15                                # [预处理] 同一装甲板不同观测点的距离容差 (防止误判)
+
         self.max_match_distance = 0.2                       # [匹配] EKF 预测值与观测值的最大欧氏距离阈值 (m)
         self.max_match_yaw_diff = 1.0                       # [匹配] 判定装甲板切换 (Armor Jump) 的 Yaw 角度差阈值 (rad)
-        self.jump_cooldown = 0         # [新增] 跳变冷却帧数计数器
-        self.jump_cooldown_max = 10    # [新增] 发生跳变后，10帧内拒绝再次跳变
+
+        self.jump_cooldown = 0                              # [新增] 跳变冷却帧数计数器
+        self.jump_cooldown_max = 10                         # [新增] 发生跳变后，10帧内拒绝再次跳变
+
         self.tracking_thres = 5                             # 进入 TRACKING 状态所需的连续检测帧数
         self.lost_thres = 10                                # 进入 LOST 状态所需的连续丢失帧数
         self.tracker_state = self.LOST                      # 跟踪器 FSM 当前状态 (LOST/DETECTING/TRACKING/TEMP_LOST)
         self.detect_count = 0                               # 连续检测帧计数器 (用于状态确认)
         self.lost_count = 0                                 # 连续丢失帧计数器 (用于状态确认)
+
+        self.dist_tol = 0.15                                # [预处理] 同一装甲板不同观测点的距离容差 (防止误判)
         self.tracked_id = None                              # 当前锁定追踪的装甲板 ID
         self.tracked_armor = None                           # 上一帧匹配成功的装甲板对象 (用于时序关联)
+
         self.debug_yaw_armors = []                          # 当前帧所有有效的装甲板观测数据
+
         self.target_state = np.zeros(9)                     # EKF 预测的 9 维系统状态向量
         self.ekf_QR_params = None                           # EKF QR 参数
         self.radius_params = None                           # 旋转半径参数
+
         self.last_yaw = 0.0                                 # 上一帧的连续化 Yaw 角 (用于处理角度跳变与去卷绕)
         self.dz = 0.0                                       # [几何] 当前板与另一组板的高度差 (z轴偏移)
         self.another_r = 0.26                               # [几何] 另一组装甲板的旋转半径
+
         self.spin = False                                   # [几何] 小陀螺旋转标准位
+
         self.min_spinning_frame = 10                        # 小陀螺旋转的最小帧数
         self.spinning_frame_lost = 5                        # 小陀螺帧数丢失阈值
+
         self.min_spinning_frame_count = 0                   # 小陀螺帧数计数器
         self.spinning_frame_lost_count = 0                  # 小陀螺帧数丢失计数器
         self.min_spinning_vel = 5.0                         # 小陀螺最低门限
+
         self.target = None                                  # 最终解算出的目标状态
         self.bullet_speed = 28.0                            # 弹道速度 (m/s)
         self.muzzle_target = None                           # 弹道解算后的目标点
+
         self.yaw_threshold_deg = 5.0                        # 允许发射的 yaw 角度阈值
         self.pitch_threshold_deg = 2.0                      # 允许发射的 pitch 角度阈值
         self.gimbal_control = None                          # 云台控制信息
+
         self.log_buffer = []                                # 系统日志缓存队列 (用于调试/可视化)
         self.text_size = 1                                  # 文字大小系数
 
@@ -228,7 +245,7 @@ class Tracker:
         self.target_state = self.ekf.X.copy()
 
         # 【新增】必须将 tracker 的记忆同步为 EKF 内部最终确定的 yaw，防止下一帧计算偏差发散
-        self.last_yaw = self.ekf.X[6]
+        self.last_yaw = self.target_state[6]
     
         # 【修改】 print -> _log
         self._log("sys", f"[Tracker] {self.c.GREEN}Init EKF with ID {self.c.CYAN}{armor.id}{self.c.RESET}")
@@ -335,14 +352,7 @@ class Tracker:
         self.ekf.X = self.target_state.copy()
 
         # ================== 协方差软重置 ==================
-        # 适度放大位置和角度的方差，让滤波器在跳变后几帧稍微更信任观测
-        self.ekf.P[0, 0] += 0.05  # xc 的方差轻微放大
-        self.ekf.P[2, 2] += 0.05  # yc 的方差轻微放大
-        self.ekf.P[4, 4] += 0.05  # za 的方差轻微放大
-        self.ekf.P[6, 6] += 0.2   # yaw 角度的方差适度放大
-
-        # [新增] 给半径的方差稍微松个绑，让它能适应新板子的物理误差
-        self.ekf.P[8, 8] += 0.01
+        self.ekf.smooth_reset_covariance()
     def update(self, armors, dt):
         """
         armors: 已经 process_armors 处理过的 Armor 对象列表 (World Frame)
@@ -428,21 +438,18 @@ class Tracker:
         # 步兵/英雄半径一般在 0.12m 到 0.4m 之间
         if self.target_state[8] < self.radius_params['r_min']:
             self.target_state[8] = self.radius_params['r_min']
-            self.ekf.X[8] = self.radius_params['r_min']
         elif self.target_state[8] > self.radius_params['r_max']:
             self.target_state[8] = self.radius_params['r_max']
-            self.ekf.X[8] = self.radius_params['r_max']
-        # [新增] 清洗异常数值并钳制物理速度 (假设最大车速不超过 15 m/s)
-        self.target_state = np.nan_to_num(self.target_state, nan=0.0, posinf=100.0, neginf=-100.0)
-        
+
         self.target_state[1] = np.clip(self.target_state[1], -15.0, 15.0)  # v_xc
         self.target_state[3] = np.clip(self.target_state[3], -15.0, 15.0)  # v_yc
-        
         # 地面机器人的 Z 轴运动主要是悬挂起伏和地形变化，不可能达到 15m/s
         # 限制在 [-2.0, 2.0] m/s 足以应对一般的坡道和颠簸，防止状态炸裂
         self.target_state[5] = np.clip(self.target_state[5], -2.0, 2.0)    # v_za
-        # ============================================
-        
+
+        # [新增] 清洗异常数值并钳制物理速度 (假设最大车速不超过 15 m/s)
+        self.target_state = np.nan_to_num(self.target_state, nan=0.0, posinf=100.0, neginf=-100.0)
+
         # 塞回给 EKF 时，再次确保是一块干净的独立内存
         self.ekf.X = self.target_state.copy()
 

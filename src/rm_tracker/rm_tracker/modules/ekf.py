@@ -268,3 +268,13 @@ class ExtendedKalmanFilter:
         self.X, self.P = _fast_ekf_update(self.X, self.P, self.H, self.R, Y, self.I)
 
         return self.X
+
+    def smooth_reset_covariance(self):
+        # ================== 协方差软重置 ==================
+        # 适度放大位置和角度的方差，让滤波器在跳变后几帧稍微更信任观测
+        self.P[0, 0] += 0.05  # xc 的方差轻微放大
+        self.P[2, 2] += 0.05  # yc 的方差轻微放大
+        self.P[4, 4] += 0.05  # za 的方差轻微放大
+        self.P[6, 6] += 0.2   # yaw 角度的方差适度放大
+        # 给半径的方差稍微松个绑，让它能适应新板子的物理误差
+        self.P[8, 8] += 0.01
