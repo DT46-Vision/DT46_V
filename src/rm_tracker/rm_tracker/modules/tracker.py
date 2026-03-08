@@ -354,20 +354,22 @@ class Tracker:
         matched = False
 
         if len(armors) > 0:
-            # 寻找同 ID 且距离最近的装甲板
-            same_id_armor = None
-            same_id_count = 0
+            # # 寻找同 ID 且距离最近的装甲板
+            # same_id_armor = None
+            # same_id_count = 0
 
             min_position_diff = float('inf')
             yaw_diff = float('inf')
 
             # 从预测状态推算当前装甲板应该在哪里
             predicted_armor_pos = self.get_armor_position_from_state(ekf_prediction)
+            # 提取 EKF 预测的车体中心位置
+            predicted_center_pos = np.array([ekf_prediction[0], ekf_prediction[2], ekf_prediction[4]])
 
             for armor in armors:
                 if armor.id == self.tracked_id:
-                    same_id_armor = armor
-                    same_id_count += 1
+                    # same_id_armor = armor
+                    # same_id_count += 1
 
                     # 计算距离差
                     p_diff = np.linalg.norm(predicted_armor_pos - armor.pos)
@@ -400,10 +402,21 @@ class Tracker:
 
                 self.target_state = self.ekf.update(measurement)
 
-            elif same_id_count == 1 and yaw_diff > self.max_match_yaw_diff * DEG2RAD: # 判定为：车转过去了，这是新的一块板子
-                # 记录跳变处理的耗时
-                self.handle_armor_jump(same_id_armor)
-                matched = True # Jump 之后认为匹配成功，但不需要再次 update EKF（因为 handle 里已经重置了）
+            # elif same_id_count == 1 and yaw_diff > self.max_match_yaw_diff * DEG2RAD: # 判定为：车转过去了，这是新的一块板子
+                # # 记录跳变处理的耗时
+                # self.handle_armor_jump(same_id_armor)
+                # matched = True # Jump 之后认为匹配成功，但不需要再次 update EKF（因为 handle 里已经重置了）
+            elif yaw_diff > self.max_match_yaw_diff * DEG2RAD:
+                # [情况 B]: 角度差异过大，判定为装甲板跳变 (Armor Jump)
+                # 增加防暴走保护：计算新装甲板与车体中心的距离
+                center_diff = np.linalg.norm(predicted_center_pos - self.tracked_armor.pos)
+
+                # 正常步兵/英雄半径在 0.2~0.3m，考虑到运动学误差，0.6m 是一个安全的物理极限
+                if center_diff < 0.6:
+                    self.handle_armor_jump(self.tracked_armor)
+                    matched = True
+                else:
+                    self._log("warn", f"[Tracker] {self.c.RED}Jump rejected! Center diff too large: {center_diff:.3f}m{self.c.RESET}")
 
             else:
                 # [情况 C]: 没匹配上
