@@ -187,7 +187,7 @@ class Tracker:
     def try_init_tracker(self, armors):
         """
         【初始化/恢复追踪】
-        逻辑：深度排序(最近优先) -> 中心优先(容差范围内) -> 状态判定
+        逻辑：深度排序(最近优先) -> 中心优先(容差范围内) -> 重新锁定
         """
         if not armors:
             return
@@ -206,15 +206,9 @@ class Tracker:
                 if abs(first.pos[0]) > abs(second.pos[0]):
                     chosen_armor = second
 
-        # 情况 A: ID 变化 (新目标或首次锁定) -> 重置锁定
-        if self.tracked_id != chosen_armor.id:
-            self.lock_target(chosen_armor)
-
-        # 情况 B: ID 不变 (短暂丢失后找回) -> 恢复追踪
-        else:
-            self.tracker_state = self.DETECTING
-            self._log("sys", f"[Tracker] {self.c.GREEN}Resume tracking ID: {self.c.CYAN}{self.tracked_id}{self.c.RESET}")
-
+        # 只要进入 try_init_tracker，说明已经处于 LOST 状态。
+        # 无论 ID 是否改变，都必须强制重新锁定并初始化 EKF。
+        self.lock_target(chosen_armor)
     def init_ekf(self, armor):
         """
         初始化 EKF (DETECTING -> TRACKING 时调用)
@@ -293,13 +287,13 @@ class Tracker:
 
         # ================== 物理状态修正开始 ==================
         raw_dz = self.target_state[4] - current_armor.pos[2]
-        
+
         # 1. 钳制高度差，防止异常 PnP 导致 dz 发散 (限制在 ±15cm)
         self.dz = np.clip(raw_dz, -0.085, 0.085)
         self.target_state[4] = current_armor.pos[2]
 
         # 2. 斩断 Z 轴错误积分：将 Z 轴速度 (v_za) 清零
-        self.target_state[5] = 0.0  
+        self.target_state[5] = 0.0
 
         # 3. 施加水平速度阻尼：削弱跳变带来的虚假惯性
         self.target_state[1] *= 0.8  # v_xc 衰减
@@ -319,17 +313,17 @@ class Tracker:
         # 修正中心位置，但保留现有的速度状态
         if np.linalg.norm(current_p - infer_p) > self.max_match_distance:
             r = self.target_state[8]
-            
+
             # 先用当前 yaw 试算
             test_xc = current_p[0] + r * np.cos(yaw)
             test_yc = current_p[1] + r * np.sin(yaw)
-            
+
             # 模长判断
             if (current_p[0]**2 + current_p[1]**2) > (test_xc**2 + test_yc**2):
                 # 如果法向量反了，同样翻转 yaw
-                yaw = self.orientation_to_yaw(current_armor.yaw + np.pi) 
+                yaw = self.orientation_to_yaw(current_armor.yaw + np.pi)
                 self.target_state[6] = yaw  # 同步更新状态机里的 yaw
-                
+
             self.target_state[0] = current_p[0] + r * np.cos(yaw)
             self.target_state[2] = current_p[1] + r * np.sin(yaw)
 
@@ -344,7 +338,7 @@ class Tracker:
         self.ekf.P[2, 2] += 0.05  # yc 的方差轻微放大
         self.ekf.P[4, 4] += 0.05  # za 的方差轻微放大
         self.ekf.P[6, 6] += 0.2   # yaw 角度的方差适度放大
-        
+
         # [新增] 给半径的方差稍微松个绑，让它能适应新板子的物理误差
         self.ekf.P[8, 8] += 0.01
     def update(self, armors, dt):
@@ -428,8 +422,7 @@ class Tracker:
         self.target_state = np.nan_to_num(self.target_state, nan=0.0, posinf=100.0, neginf=-100.0)
         self.target_state[1] = np.clip(self.target_state[1], -15.0, 15.0)  # v_xc
         self.target_state[3] = np.clip(self.target_state[3], -15.0, 15.0)  # v_yc
-        
-        # ================== 修改部分 ==================
+
         # 地面机器人的 Z 轴运动主要是悬挂起伏和地形变化，不可能达到 15m/s
         # 限制在 [-2.0, 2.0] m/s 足以应对一般的坡道和颠簸，防止状态炸裂
         self.target_state[5] = np.clip(self.target_state[5], -2.0, 2.0)    # v_za
@@ -443,18 +436,22 @@ class Tracker:
                 if self.detect_count > self.tracking_thres:
                     self.tracker_state = self.TRACKING
                     self.detect_count = 0
-                    # 【修改】 print -> _log
                     self._log("state", f"[Tracker]{self.c.GREEN} DETECTING {self.c.PINK}-> {self.c.CYAN}TRACKING {self.c.CYAN}(ID: {self.tracked_id}){self.c.RESET}")
             else:
-                self.detect_count = 0
-                self.tracker_state = self.LOST
+                # 给 DETECTING 一定的容错率（例如容忍丢失次数不超过已捕获次数的一半，或者简单点，不要立刻归零）
+                # 这里采用：如果没有匹配上，不立刻 LOST，而是削减置信度（扣除计数），扣到 0 以下才判定彻底失败
+                self.detect_count -= 1
+                if self.detect_count <= 0:
+                    self.detect_count = 0
+                    self.tracker_state = self.LOST
 
         elif self.tracker_state == self.TRACKING:
             if not matched:
                 self.tracker_state = self.TEMP_LOST
-                self.lost_count += 1
-                # 【修改】 print -> _log
+                self.lost_count = 1  # 明确从 1 开始计数
                 self._log("state", f"[Tracker] {self.c.GREEN}TRACKING {self.c.PINK}-> {self.c.CYAN}TEMP_LOST{self.c.RESET}")
+            else:
+                self.lost_count = 0  # 显式清零，保持状态干净
 
         elif self.tracker_state == self.TEMP_LOST:
             if not matched:
@@ -462,14 +459,11 @@ class Tracker:
                 if self.lost_count > self.lost_thres:
                     self.tracker_state = self.LOST
                     self.lost_count = 0
-                    # 【修改】 print -> _log
                     self._log("state", f"[Tracker] {self.c.GREEN}TEMP_LOST {self.c.PINK}-> {self.c.CYAN}LOST{self.c.RESET}")
             else:
                 self.tracker_state = self.TRACKING
                 self.lost_count = 0
-                # 【修改】 print -> _log
                 self._log("state", f"[Tracker] {self.c.GREEN}TEMP_LOST {self.c.PINK}-> {self.c.CYAN}TRACKING{self.c.RESET}")
-
     def find_all_armors(self):
         """
         利用 EKF 状态解算出当前时刻 4 块装甲板的世界坐标
@@ -754,7 +748,7 @@ class Tracker:
         # 【修正】self.tracker_state -> snapshot['tracker_state']
         if snapshot['tracker_state'] == self.LOST:
             return img
-            
+
         draw = img.copy()
         scale = snapshot['text_size']
 
@@ -828,10 +822,10 @@ class Tracker:
         # 【修正】self.debug_yaw_armors -> snapshot['debug_yaw_armors']
         if not snapshot['debug_yaw_armors']:
             return img
-            
+
         draw = img.copy()
         scale = snapshot['text_size']
-        
+
         font_scale = 1.0 * scale
         thickness = max(1, int(3 * scale))
         stroke_thickness = thickness + max(1, int(5 * scale))
@@ -886,7 +880,7 @@ class Tracker:
         if snapshot.get('muzzle_target') is not None:
             aim_pos_world = snapshot['muzzle_target'].pos
             aim_pos_cam = self.world_to_cam(tf, aim_pos_world, imu_rpy)
-            
+
             uv_aim, vis_aim = tf.project_point(aim_pos_cam)
             if vis_aim:
                 aim_point = (int(uv_aim[0]), int(uv_aim[1]))
@@ -900,7 +894,7 @@ class Tracker:
 
         font_07 = 0.7 * scale
         font_08 = 0.8 * scale
-        
+
         thick_1 = max(1, int(1 * scale))
         thick_2 = max(1, int(2 * scale))
 
@@ -943,7 +937,7 @@ class Tracker:
             estimate_img = self.draw_estimate_with_snapshot(snapshot,tf, cv_img, imu_rpy)
             yaw_debug_img = self.draw_observation_yaw_with_snapshot(snapshot,tf, cv_img, imu_rpy)
         return ballistic_img, estimate_img, yaw_debug_img
-    
+
     def get_render_snapshot(self):
         """提取当前状态快照，用于无锁渲染"""
         return {
