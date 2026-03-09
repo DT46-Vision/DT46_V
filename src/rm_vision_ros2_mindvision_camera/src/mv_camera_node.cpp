@@ -60,8 +60,7 @@ public:
     image_msg_.data.reserve(
       t_capability_.sResolutionRange.iHeightMax * t_capability_.sResolutionRange.iWidthMax * 3);
 
-    // 设置手动曝光
-    CameraSetAeState(h_camera_, false);
+    // 设置单次自动白平衡，作为初始基准
     CameraSetOnceWB(h_camera_);
     // 设置帧率
     // CameraSetFrameSpeed(h_camera_, 5);
@@ -158,6 +157,11 @@ private:
     param_desc.integer_range.resize(1);
     param_desc.integer_range[0].step = 1;
 
+    // 自动曝光 (Auto Exposure)
+    bool auto_exp = this->declare_parameter("auto_exposure", false);
+    CameraSetAeState(h_camera_, auto_exp);
+    RCLCPP_INFO(this->get_logger(), "Auto Exposure = %d", auto_exp);
+
     // Exposure time
     param_desc.description = "Exposure time in microseconds";
     // 对于CMOS传感器，其曝光的单位是按照行来计算的
@@ -180,6 +184,11 @@ private:
     analog_gain = this->declare_parameter("analog_gain", analog_gain, param_desc);
     CameraSetAnalogGain(h_camera_, analog_gain);
     RCLCPP_INFO(this->get_logger(), "Analog gain = %d", analog_gain);
+
+    // 自动白平衡 (Auto White Balance)
+    bool auto_wb = this->declare_parameter("auto_white_balance", true);
+    CameraSetWbMode(h_camera_, auto_wb);
+    RCLCPP_INFO(this->get_logger(), "Auto White Balance = %d", auto_wb);
 
     // RGB Gain
     // Get default value
@@ -231,7 +240,13 @@ private:
     rcl_interfaces::msg::SetParametersResult result;
     result.successful = true;
     for (const auto & param : parameters) {
-      if (param.get_name() == "exposure_time") {
+      if (param.get_name() == "auto_exposure") {
+        int status = CameraSetAeState(h_camera_, param.as_bool());
+        if (status != CAMERA_STATUS_SUCCESS) {
+          result.successful = false;
+          result.reason = "Failed to set auto exposure, status = " + std::to_string(status);
+        }
+      } else if (param.get_name() == "exposure_time") {
         int status = CameraSetExposureTime(h_camera_, param.as_int());
         if (status != CAMERA_STATUS_SUCCESS) {
           result.successful = false;
@@ -242,6 +257,26 @@ private:
         if (status != CAMERA_STATUS_SUCCESS) {
           result.successful = false;
           result.reason = "Failed to set analog gain, status = " + std::to_string(status);
+        }
+      } else if (param.get_name() == "auto_white_balance") {
+        bool is_auto = param.as_bool();
+
+        if (is_auto) {
+          // 1. 强制将底层 RGB 增益复位到中性基准 (100 代表 1.0 倍增益)
+          CameraSetGain(h_camera_, 100, 100, 100);
+
+          // 2. 给予 SDK 一定时间（约一两帧的间隔）以抓取复位后的新图像用于计算
+          std::this_thread::sleep_for(std::chrono::milliseconds(50));
+
+          // 3. 强制触发一次白平衡计算
+          CameraSetOnceWB(h_camera_);
+        }
+
+        // 4. 设置连续白平衡模式
+        int status = CameraSetWbMode(h_camera_, is_auto);
+        if (status != CAMERA_STATUS_SUCCESS) {
+          result.successful = false;
+          result.reason = "Failed to set auto white balance, status = " + std::to_string(status);
         }
       } else if (param.get_name() == "rgb_gain.r") {
         r_gain_ = param.as_int();
