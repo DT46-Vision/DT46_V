@@ -55,6 +55,7 @@ public:
 
     // 获得相机的特性描述结构体。该结构体中包含了相机可设置的各种参数的范围信息。决定了相关函数的参数
     CameraGetCapability(h_camera_, &t_capability_);
+    RCLCPP_INFO(this->get_logger(), "Frame speed mode count (iFrameSpeedDesc) = %d", t_capability_.iFrameSpeedDesc);
 
     // 直接使用vector的内存作为相机输出buffer
     image_msg_.data.reserve(
@@ -63,7 +64,7 @@ public:
     // 设置单次自动白平衡，作为初始基准
     CameraSetOnceWB(h_camera_);
     // 设置帧率
-    // CameraSetFrameSpeed(h_camera_, 5);
+    CameraSetFrameSpeed(h_camera_, t_capability_.iFrameSpeedDesc - 1);
 
     // Declare camera parameters
     declareParameters();
