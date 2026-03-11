@@ -11,11 +11,11 @@
     encoding_str: "bgr8"
 
     # 图像尺寸
-    frame_width: 640
-    frame_height: 480
+    frame_width: 1920
+    frame_height: 1080
 
     # 帧率 (640x480 下 MJPG 通常能跑很高，240是合理的)
-    fps: 240.0
+    fps: 60.0
 
     # 曝光
     # 如果设为 True，exposure_time 将被忽略（取决于相机硬件逻辑）
