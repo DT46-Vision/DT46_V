@@ -4,14 +4,14 @@ camera_name: mv_camera
 camera_matrix:
   rows: 3
   cols: 3
-  data: [1088.05959,    0.     ,  646.65131,
-            0.     , 1088.35067,  510.69345,
+  data: [1075.77876,    0.     ,  649.75819,
+            0.     , 1075.95573,  525.30871,
             0.     ,    0.     ,    1.     ]
 distortion_model: plumb_bob
 distortion_coefficients:
   rows: 1
   cols: 5
-  data: [-0.471096, 0.203154, 0.000658, -0.000647, 0.000000]
+  data: [-0.454786, 0.179046, -0.001430, -0.000463, 0.000000]
 rectification_matrix:
   rows: 3
   cols: 3
@@ -21,6 +21,6 @@ rectification_matrix:
 projection_matrix:
   rows: 3
   cols: 4
-  data: [879.21931,   0.     , 648.57171,   0.     ,
-           0.     , 960.85185, 511.24148,   0.     ,
+  data: [867.12526,   0.     , 653.99005,   0.     ,
+           0.     , 950.26481, 527.69276,   0.     ,
            0.     ,   0.     ,   1.     ,   0.     ]
