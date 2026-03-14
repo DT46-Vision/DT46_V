@@ -73,7 +73,7 @@ class Tracker:
         self.max_match_yaw_diff = 1.0                       # [匹配] 判定装甲板切换 (Armor Jump) 的 Yaw 角度差阈值 (rad)
 
         self.jump_cooldown = 0                              # [新增] 跳变冷却帧数计数器
-        self.jump_cooldown_max = 10                         # [新增] 发生跳变后，10帧内拒绝再次跳变
+        self.jump_cooldown_max = 20                         # [新增] 发生跳变后，10帧内拒绝再次跳变
 
         self.tracking_thres = 5                             # 进入 TRACKING 状态所需的连续检测帧数
         self.lost_thres = 10                                # 进入 LOST 状态所需的连续丢失帧数
@@ -94,6 +94,8 @@ class Tracker:
         self.last_yaw = 0.0                                 # 上一帧的连续化 Yaw 角 (用于处理角度跳变与去卷绕)
         self.dz = 0.0                                       # [几何] 当前板与另一组板的高度差 (z轴偏移)
         self.another_r = 0.26                               # [几何] 另一组装甲板的旋转半径
+
+        self.system_delay = 0.1
 
         self.spin = False                                   # [几何] 小陀螺旋转标准位
 
@@ -223,6 +225,7 @@ class Tracker:
         # 只要进入 try_init_tracker，说明已经处于 LOST 状态。
         # 无论 ID 是否改变，都必须强制重新锁定并初始化 EKF。
         self.lock_target(chosen_armor)
+
     def init_ekf(self, armor):
         """
         初始化 EKF (DETECTING -> TRACKING 时调用)
@@ -506,9 +509,8 @@ class Tracker:
         center_dist = math.sqrt(xc**2 + yc**2 + za**2)
         rough_dist = max(0.1, center_dist - r) 
 
-        # 2. 预测时间 = 飞行时间 + 系统发弹延迟
-        system_delay = 0.05 
-        t = (rough_dist / self.bullet_speed) + system_delay
+        # 2. 预测时间 = 飞行时间 + 系统发弹延迟 
+        t = (rough_dist / self.bullet_speed) + self.system_delay
 
         # 3. 计算未来状态
         future_state = current_state.copy()
@@ -882,7 +884,6 @@ class Tracker:
 
         return draw
 
-    # 【修正】补上了 snapshot 参数
     def draw_ballistic_with_snapshot(self, snapshot, tf, img, imu_rpy):
         """
         绘制弹道解算视图

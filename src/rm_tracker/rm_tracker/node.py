@@ -36,8 +36,8 @@ class RmTracker(Node):
         self.declare_parameter('rotation_rpy_y', -180.0)        # 陀螺仪到相机姿态变换 -> y
         self.declare_parameter('show_rpy', False)               # 陀螺仪调试 - 显示原始数据和调整后的数据
         self.declare_parameter('debug', False)                  # 显示调试信息
-        self.declare_parameter('text_size', 1.0)                  # 显示文字大小
-        self.declare_parameter('display_fps_limit', True)
+        self.declare_parameter('text_size', 1.0)                # 显示文字大小
+        self.declare_parameter('display_fps_limit', True)       # 控制显示帧率
         self.declare_parameter('display', False)                # 显示处理结果
         # -----------------------TRACKER---------------------
         self.declare_parameter('target_color', 0)               # 目标敌方阵营 (0: RED, 1: BLUE)
@@ -49,7 +49,8 @@ class RmTracker(Node):
         self.declare_parameter('cam_to_gun_rpy_y', 0.0)         # [外参] 相机相对于枪口的旋转欧拉角 -> y
         self.declare_parameter('dist_tol', 0.05)                # [装甲板预处理] 同一装甲板不同观测点的距离容差 (防止识别同一台车辆时一直跳跃跟踪装甲板)
         self.declare_parameter('max_match_distance', 0.2)       # [匹配] EKF 预测值与观测值的最大欧氏距离阈值 (m)
-        self.declare_parameter('max_match_yaw_diff', 57.0)       # [匹配] 判定装甲板切换 (Armor Jump) 的 Yaw 角度差阈值 (rad)
+        self.declare_parameter('max_match_yaw_diff', 57.0)      # [匹配] 判定装甲板切换 (Armor Jump) 的 Yaw 角度差阈值 (rad)
+        self.declare_parameter('jump_cooldown_max', 20)         # [匹配] 装甲板跳转的冷却时间 (帧)
         self.declare_parameter('tracking_thres', 5)             # 进入 TRACKING 状态所需的连续检测帧数
         self.declare_parameter('lost_thres', 10)                # 进入 LOST 状态所需的连续丢失帧数
         self.declare_parameter('ekf_QR_q_xyz', 20.0)            # EKF QR 参数 - 过程噪声 Q 位置和速度的噪声系数 (s2qxyz)
@@ -57,11 +58,12 @@ class RmTracker(Node):
         self.declare_parameter('ekf_QR_q_r', 800.0)             # EKF QR 参数 - 过程噪声 Q 半径的噪声系数 (s2qr)
         self.declare_parameter('ekf_QR_r_xyz_factor', 0.05)     # EKF QR 参数 - 观测噪声 R 位置观测的动态噪声系数 (距离 * factor)
         self.declare_parameter('ekf_QR_r_yaw', 0.02)            # EKF QR 参数 - 观测噪声 R 偏航角观测的固定方差
-        self.declare_parameter('ekf_QR_stable_dist', 1.5)       
+        self.declare_parameter('ekf_QR_stable_dist', 1.5)       # EKF QR 状态参数 - 稳定 detection 状态的半径门限 (m)
         self.declare_parameter('radius_r1', 0.26)               # 旋转半径参数 - r1 (默认一长一短)
         self.declare_parameter('radius_r2', 0.26)               # 旋转半径参数 - r2
         self.declare_parameter('radius_r_max', 0.4)             # 旋转半径参数 - r_max
         self.declare_parameter('radius_r_min', 0.12)            # 旋转半径参数 - r_min
+        self.declare_parameter('system_delay', 0.1)             # 系统延迟
         self.declare_parameter('min_spinning_frame', 10)        # 小陀螺门限
         self.declare_parameter('spinning_frame_lost', 5)        # 小陀螺丢失帧数门限
         self.declare_parameter('min_spinning_vel', 2.5)         # 旋转速度
@@ -94,6 +96,7 @@ class RmTracker(Node):
         dist_tol = self.get_parameter('dist_tol').value                        # [装甲板预处理]
         max_match_distance = self.get_parameter('max_match_distance').value    # [匹配] 距离阈值
         max_match_yaw_diff = self.get_parameter('max_match_yaw_diff').value    # [匹配] 角度阈值
+        jump_cooldown_max = self.get_parameter('jump_cooldown_max').value      # 装甲板跳转冷却时间  
         tracking_thres = self.get_parameter('tracking_thres').value            # TRACKING 阈值
         lost_thres = self.get_parameter('lost_thres').value                    # LOST 阈值
         # [EKF QR 参数]
@@ -122,6 +125,7 @@ class RmTracker(Node):
             'r_max': radius_r_max,
             'r_min': radius_r_min
         }
+        system_delay = self.get_parameter('system_delay').value
         # 反小陀螺参数
         min_spinning_frame = self.get_parameter('min_spinning_frame').value
         spinning_frame_lost = self.get_parameter('spinning_frame_lost').value
@@ -139,10 +143,12 @@ class RmTracker(Node):
         self.tracker.dist_tol = dist_tol
         self.tracker.max_match_distance = max_match_distance
         self.tracker.max_match_yaw_diff = max_match_yaw_diff
+        self.tracker.jump_cooldown_max = jump_cooldown_max
         self.tracker.tracking_thres = int(tracking_thres)
         self.tracker.lost_thres = int(lost_thres)
         self.tracker.ekf_QR_params = QR_params
         self.tracker.radius_params = radius_params
+        self.tracker.system_delay = system_delay
         self.tracker.min_spinning_frame = min_spinning_frame
         self.tracker.spinning_frame_lost = spinning_frame_lost
         self.tracker.min_spinning_vel = min_spinning_vel
@@ -293,6 +299,10 @@ class RmTracker(Node):
                     if self.is_changed(self.tracker.max_match_yaw_diff, value):
                         self.tracker.max_match_yaw_diff = value
                         reset_required = True
+                elif name == 'jump_cooldown_max':
+                    if self.is_changed(self.tracker.jump_cooldown_max, value):
+                        self.tracker.jump_cooldown_max = int(value)
+                        reset_required = True
 
                 # 外参平移
                 elif name == 'cam_to_gun_pos_x':
@@ -364,6 +374,11 @@ class RmTracker(Node):
                 elif name == 'ekf_QR_stable_dist':
                     if self.is_changed(self.tracker.ekf_QR_params['stable_dist'], value):
                         self.tracker.ekf_QR_params['stable_dist'] = value
+                        reset_required = True
+
+                elif name == 'system_delay':
+                    if self.is_changed(self.tracker.system_delay, value):
+                        self.tracker.system_delay = value
                         reset_required = True
 
                 # 小陀螺判断

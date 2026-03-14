@@ -31,6 +31,7 @@ rm_tracker:
     dist_tol: 0.05              # 预处理：两块板距离容差 (m)
     max_match_distance: 0.2     # 匹配：最大距离阈值 (m)
     max_match_yaw_diff: 57.0     # 匹配：判定跳变的 Yaw 差值 (deg)
+    jump_cooldown_max: 20
     tracking_thres: 5           # 连续检测帧数 (进入 TRACKING) - int
     lost_thres: 10              # 连续丢失帧数 (进入 LOST) - int
 
@@ -49,6 +50,8 @@ rm_tracker:
     radius_r2: 0.26              # 车辆半径 2 (m)
     radius_r_max: 0.4              # 车辆最大半径 (m)
     radius_r_min: 0.15              # 车辆最小半径 (m)
+
+    system_delay: 0.1
 
     # 反小陀螺
     max_spinning_frame: 10
