@@ -62,8 +62,10 @@ rm_tracker:
     bullet_speed: 28.0            # 弹速 (m/s)
 
     # 发弹角度阈值
-    yaw_threshold_deg: 5.0     # 允许发射的 yaw 角度阈值
-    pitch_threshold_deg: 5.0   # 允许发射的 pitch 角度阈值
+    shootable_dist: 3.0
+    distance_decress_ratio: 0.60
+    yaw_tolerance_deg: 5.0     # 允许发射的 yaw 角度阈值
+    pitch_tolerance_deg: 5.0   # 允许发射的 pitch 角度阈值
 
     text_size: 1.5
 

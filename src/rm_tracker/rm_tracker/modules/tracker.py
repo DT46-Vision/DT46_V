@@ -31,7 +31,7 @@ class ColorPrint:
 
 class Armor:
     # 限制允许的属性，省掉 __dict__ 的内存开销
-    __slots__ = ['id', 'pos', 'yaw', 'index', 'angle_diff']
+    __slots__ = ['id', 'pos', 'yaw', 'index', 'dist', 'angle_diff']
 
     def __init__(self, id, x, y, z, yaw, index=None):
         self.id = str(id)
@@ -40,6 +40,7 @@ class Armor:
 
         # 之前在字典里乱塞的属性，现在正式给名分
         self.index = index      # 0,1,2,3 (装甲板序号)
+        self.dist = np.linalg.norm(self.pos)
         self.angle_diff = 0.0   # 枪口偏离目标的角度
     def clone(self):
         """
@@ -47,6 +48,7 @@ class Armor:
         """
         a = Armor(self.id, self.pos[0], self.pos[1], self.pos[2], self.yaw, self.index)
         a.angle_diff = self.angle_diff
+        a.dist = self.dist
         return a
 
 class Tracker:
@@ -110,8 +112,13 @@ class Tracker:
         self.bullet_speed = 28.0                            # 弹道速度 (m/s)
         self.muzzle_target = None                           # 弹道解算后的目标点
 
-        self.yaw_threshold_deg = 5.0                        # 允许发射的 yaw 角度阈值
-        self.pitch_threshold_deg = 2.0                      # 允许发射的 pitch 角度阈值
+        self.shootable_dist = 3.0                           # [弹道] 允许发射的弹道距离阈值 (m)
+        self.distance_decress_ratio = 0.60                  # [弹道] 距离递减比例
+        self.yaw_tolerance_deg = 5.0                        # 允许发射的 yaw 角度阈值
+        self.pitch_tolerance_deg = 2.0                      # 允许发射的 pitch 角度阈值
+        self.yaw_tolerance_deg_mix = self.yaw_tolerance_deg # 混合模式下的 yaw 角度阈值
+        self.pitch_tolerance_deg_mix = self.pitch_tolerance_deg # 混合模式下的 pitch 角度阈值
+
         self.gimbal_control = None                          # 云台控制信息
 
         self.log_buffer = []                                # 系统日志缓存队列 (用于调试/可视化)
@@ -705,13 +712,21 @@ class Tracker:
     def gimbal_to_deg(self, gimbal_control):
         return [gimbal_control[0] * RAD2DEG, gimbal_control[1] * RAD2DEG, False]
 
-    def can_fire(self, gimbal_control):
+    def can_fire(self, dist, gimbal_control):
         """
         【修改】
         can_fire: bool
         """
         yaw, pitch = gimbal_control[0], gimbal_control[1]
-        gimbal_control[2] = (abs(yaw) < self.yaw_threshold_deg and abs(pitch) < self.pitch_threshold_deg)
+
+        dist_mix = dist * self.distance_decress_ratio
+        yaw_mix = self.yaw_tolerance_deg * (1 - self.distance_decress_ratio)
+        pitch_mix = self.pitch_tolerance_deg * (1 - self.distance_decress_ratio)
+
+        self.yaw_tolerance_deg_mix = dist_mix + yaw_mix
+        self.pitch_tolerance_deg_mix = dist_mix + pitch_mix
+
+        gimbal_control[2] = (abs(yaw) < self.yaw_tolerance_deg_mix and abs(pitch) < self.pitch_tolerance_deg_mix and dist <= self.shootable_dist)
 
         return gimbal_control
 
@@ -768,7 +783,7 @@ class Tracker:
             target_muzzle = self.world_to_muzzle(tf, target_cam, self.cam_to_gun_pos, imu_rpy)
             gimbal_control = self.solve_ballistic(tf, target_muzzle, self.cam_to_gun_rpy, imu_rpy)
             gimbal_control = self.gimbal_to_deg(gimbal_control)
-            gimbal_control = self.can_fire(gimbal_control)
+            gimbal_control = self.can_fire(target_cam.dist, gimbal_control)
             self.gimbal_control = gimbal_control
 
         # 返回解算结果
@@ -930,7 +945,7 @@ class Tracker:
         thick_1 = max(1, int(1 * scale))
         thick_2 = max(1, int(2 * scale))
 
-        dist = np.linalg.norm(tgt_pos_world)
+        dist = snapshot['target'].dist
         # 【修正】self.target.angle_diff -> snapshot['target'].angle_diff
         angle_diff_deg = snapshot['target'].angle_diff * RAD2DEG
 
@@ -938,6 +953,9 @@ class Tracker:
         gc = snapshot['gimbal_control']
         if gc is None:
             gc = [0.0, 0.0, False]
+
+        yaw_tolerance_deg = snapshot['yaw_tolerance_deg']
+        pitch_tolerance_deg = snapshot['pitch_tolerance_deg']
 
         status_color = (0, 255, 0) if gc[2] else (0, 0, 255)
         status_text = "FIRE ENABLE" if gc[2] else "HOLD FIRE"
@@ -949,10 +967,12 @@ class Tracker:
             (f"[{spin_status}]", font_08, spin_status_color, thick_2, 5 * scale),
             (f"yaw_val: {snapshot['ekf_yaw_vel']:.2f} rad", font_07, (255, 255, 255), thick_1, step_scaled * 1),
             (f"Dist : {dist:.2f} m", font_07, (255, 255, 255), thick_1, step_scaled * 2),
-            (f"Pitch: {gc[1]:.2f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 3),
-            (f"Yaw  : {gc[0]:.2f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 4),
-            (f"Diff : {angle_diff_deg:.1f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 5),
-            (f"[{status_text}]", font_08, status_color, thick_2, step_scaled * 6 + 5 * scale)
+            (f"Diff : {angle_diff_deg:.1f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 3),
+            (f"Pitch: {gc[1]:.2f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 4),
+            (f"Yaw  : {gc[0]:.2f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 5),
+            (f"pitch_tol_deg : {pitch_tolerance_deg:.2f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 6),
+            (f"yaw_tol_deg : {yaw_tolerance_deg:.2f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 7),
+            (f"[{status_text}]", font_08, status_color, thick_2, step_scaled * 8 + 5 * scale)
         ]
 
         for text, font_scale, color, thickness, y_offset in info_lines:
@@ -982,7 +1002,8 @@ class Tracker:
             'target': self.target.clone() if self.target else None,
             'muzzle_target': self.muzzle_target.clone() if self.muzzle_target else None,
             'spin': self.spin,
-            # 【关键修复】列表的浅拷贝非常快，无需 deepcopy
+            'yaw_tolerance_deg': self.yaw_tolerance_deg_mix,
+            'pitch_tolerance_deg': self.pitch_tolerance_deg_mix,
             'gimbal_control': list(self.gimbal_control) if self.gimbal_control else None,
             'ekf_yaw_vel': self.ekf.X[7] if self.ekf else 0.0,
             'text_size': self.text_size

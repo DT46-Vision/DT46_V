@@ -68,8 +68,10 @@ class RmTracker(Node):
         self.declare_parameter('spinning_frame_lost', 5)        # 小陀螺丢失帧数门限
         self.declare_parameter('min_spinning_vel', 2.5)         # 旋转速度
         self.declare_parameter('bullet_speed', 28.0)            # 子弹速度
-        self.declare_parameter('yaw_threshold_deg', 5.0)        # 允许发射的 yaw 角度阈值
-        self.declare_parameter('pitch_threshold_deg', 2.0)      # 允许发射的 pitch 角度阈值
+        self.declare_parameter('shootable_dist', 3.0)           # 允许发射的子弹距离阈值
+        self.declare_parameter('distance_decress_ratio', 0.60)  # 距离缩减比例
+        self.declare_parameter('yaw_tolerance_deg', 5.0)        # 允许发射的 yaw 角度阈值
+        self.declare_parameter('pitch_tolerance_deg', 2.0)      # 允许发射的 pitch 角度阈值
         # ----------------------获取参数----------------------
         # ------------------------NODE-----------------------
         log_throttle_ms = self.get_parameter('log_throttle_ms').value   # 日志节流
@@ -132,8 +134,10 @@ class RmTracker(Node):
         min_spinning_vel = self.get_parameter('min_spinning_vel').value
         bullet_speed = self.get_parameter('bullet_speed').value
         # 发弹判断
-        yaw_threshold_deg = self.get_parameter('yaw_threshold_deg').value
-        pitch_threshold_deg = self.get_parameter('pitch_threshold_deg').value
+        shootable_dist = self.get_parameter('shootable_dist').value
+        distance_decress_ratio = self.get_parameter('distance_decress_ratio').value
+        yaw_tolerance_deg = self.get_parameter('yaw_tolerance_deg').value
+        pitch_tolerance_deg = self.get_parameter('pitch_tolerance_deg').value
         # ----------------------初始化对象----------------------
         self.log_throttler = LogThrottler(self, log_throttle_ms)        # 1. 初始化 LogThrottler
         self.tracker = Tracker()                                        # 2. 初始化 Tracker   
@@ -153,8 +157,10 @@ class RmTracker(Node):
         self.tracker.spinning_frame_lost = spinning_frame_lost
         self.tracker.min_spinning_vel = min_spinning_vel
         self.tracker.bullet_speed = bullet_speed
-        self.tracker.yaw_threshold_deg = yaw_threshold_deg
-        self.tracker.pitch_threshold_deg = pitch_threshold_deg
+        self.tracker.shootable_dist = shootable_dist
+        self.tracker.distance_decress_ratio = distance_decress_ratio
+        self.tracker.yaw_tolerance_deg = yaw_tolerance_deg
+        self.tracker.pitch_tolerance_deg = pitch_tolerance_deg
         self.imu_rpy = None
         self.tf = RmTF()
         self.bridge = CvBridge() # 初始化转换器
@@ -402,15 +408,25 @@ class RmTracker(Node):
                         self.tracker.bullet_speed = value
                         reset_required = False
                 
-                # 发弹角度判断
-                elif name == 'yaw_threshold_deg':
-                    if self.is_changed(self.tracker.yaw_threshold_deg, value):
-                        self.tracker.yaw_threshold_deg = value
+                # 发弹判断
+                elif name == 'shootable_dist':
+                    if self.is_changed(self.tracker.shootable_dist, value):
+                        self.tracker.shootable_dist = value
                         reset_required = False
 
-                elif name == 'pitch_threshold_deg':
-                    if self.is_changed(self.tracker.pitch_threshold_deg, value):
-                        self.tracker.pitch_threshold_deg = value
+                elif name == 'distance_decress_ratio':
+                    if self.is_changed(self.tracker.distance_decress_ratio, value):
+                        self.tracker.distance_decress_ratio = value
+                        reset_required = False
+
+                elif name == 'yaw_tolerance_deg':
+                    if self.is_changed(self.tracker.yaw_tolerance_deg, value):
+                        self.tracker.yaw_tolerance_deg = value
+                        reset_required = False
+
+                elif name == 'pitch_tolerance_deg':
+                    if self.is_changed(self.tracker.pitch_tolerance_deg, value):
+                        self.tracker.pitch_tolerance_deg = value
                         reset_required = False
 
             # -----------------------------------------------------------
