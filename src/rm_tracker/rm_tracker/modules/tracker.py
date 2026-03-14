@@ -2,10 +2,39 @@ import math
 import numpy as np
 from .ekf import ExtendedKalmanFilter
 import cv2
+from dataclasses import dataclass
+from typing import List
 
 # 常量定义
 RAD2DEG = 180.0 / math.pi
 DEG2RAD = math.pi / 180.0
+
+@dataclass
+class ArmorAppearance:
+    """
+    装甲板外观数据类
+    """
+    def __init__(self, id, width, height):
+        self.id = id
+        self.width = width
+        self.height = height
+        self.diagonal: float = math.sqrt(self.width ** 2 + self.height ** 2)
+
+# 使用列表存储所有装甲板外观实例
+armor_list: List[ArmorAppearance] = [
+    ArmorAppearance(id=0, width=236.0, height=125.0),
+    ArmorAppearance(id=1, width=135.0, height=125.0),
+    ArmorAppearance(id=2, width=135.0, height=125.0),
+    ArmorAppearance(id=3, width=135.0, height=125.0),
+    ArmorAppearance(id=4, width=135.0, height=125.0),
+    ArmorAppearance(id=5, width=135.0, height=125.0),
+    ArmorAppearance(id=6, width=236.0, height=125.0),
+    ArmorAppearance(id=7, width=135.0, height=125.0),
+    ArmorAppearance(id=8, width=135.0, height=125.0),
+    ArmorAppearance(id=9, width=135.0, height=125.0),
+    ArmorAppearance(id=10, width=135.0, height=125.0),
+    ArmorAppearance(id=11, width=135.0, height=125.0)
+]
 
 def normalize_angle(angle):
     """
@@ -31,10 +60,10 @@ class ColorPrint:
 
 class Armor:
     # 限制允许的属性，省掉 __dict__ 的内存开销
-    __slots__ = ['id', 'pos', 'yaw', 'index', 'dist', 'angle_diff']
+    __slots__ = ['id', 'pos', 'yaw', 'index', 'dist', 'angle_diff', 'target_to_armor_dist']
 
     def __init__(self, id, x, y, z, yaw, index=None):
-        self.id = str(id)
+        self.id = id
         self.pos = np.array([x, y, z])
         self.yaw = yaw
 
@@ -42,6 +71,7 @@ class Armor:
         self.index = index      # 0,1,2,3 (装甲板序号)
         self.dist = np.linalg.norm(self.pos)
         self.angle_diff = 0.0   # 枪口偏离目标的角度
+        self.target_to_armor_dist = 0.0
     def clone(self):
         """
         【关键修复】手写极速克隆，替代耗时百倍的 copy.deepcopy
@@ -49,6 +79,7 @@ class Armor:
         a = Armor(self.id, self.pos[0], self.pos[1], self.pos[2], self.yaw, self.index)
         a.angle_diff = self.angle_diff
         a.dist = self.dist
+        a.target_to_armor_dist = self.target_to_armor_dist
         return a
 
 class Tracker:
@@ -582,18 +613,18 @@ class Tracker:
                 if self.spinning_frame_lost_count > self.spinning_frame_lost:
                     self.spin = False
                     self.spinning_frame_lost_count = 0
-
-        # ---------------- 选板决策 ----------------
+        target_to_armor_dist = np.linalg.norm(state[0:2])
+        # ---------------- 选板决策 -------------xc, yc---
         if self.spin:
-            # 小陀螺模式：“打半边”策略
+            # 小陀螺模式：
             same_side = []
             for armor in robot_armors:
                 norm_yaw = normalize_angle(armor.yaw)
                 if self.ekf.X[7] >= 0:
-                    if norm_yaw >= 0:
+                    if norm_yaw <= 0:
                         same_side.append(armor)
                 else:
-                    if norm_yaw < 0:
+                    if norm_yaw > 0:
                         same_side.append(armor)
 
             for armor in same_side:
@@ -604,6 +635,11 @@ class Tracker:
                 if dist < min_dist:
                     best_armor = armor
                     min_dist = dist
+            target = best_armor
+            target.pos[0] = xc - np.sin(yaw_center_to_armor) * self.ekf.X[8]
+            target.pos[1] = yc - np.cos(yaw_center_to_armor) * self.ekf.X[8]
+            target_to_armor_dist = abs(np.linalg.norm(best_armor.pos - target.pos))
+            target.target_to_armor_dist = target_to_armor_dist
 
         else:
             # 非小陀螺模式：候选前二，选夹角最小（最正对）
@@ -619,9 +655,9 @@ class Tracker:
 
                 if angle_diff < min_angle_diff:
                     min_angle_diff = angle_diff
-                    best_armor = armor
+                    target = armor
 
-        self.target = best_armor
+        self.target = target
         return best_armor
 
     def world_to_muzzle(self, tf, target, offset_pos, imu_rpy):
@@ -712,21 +748,23 @@ class Tracker:
     def gimbal_to_deg(self, gimbal_control):
         return [gimbal_control[0] * RAD2DEG, gimbal_control[1] * RAD2DEG, False]
 
-    def can_fire(self, dist, gimbal_control):
+    def can_fire(self, target, gimbal_control):
         """
         【修改】
         can_fire: bool
         """
         yaw, pitch = gimbal_control[0], gimbal_control[1]
 
-        dist_mix = dist * self.distance_decress_ratio
+        dist_mix = target.dist * self.distance_decress_ratio
         yaw_mix = self.yaw_tolerance_deg * (1 - self.distance_decress_ratio)
         pitch_mix = self.pitch_tolerance_deg * (1 - self.distance_decress_ratio)
 
         self.yaw_tolerance_deg_mix = dist_mix + yaw_mix
         self.pitch_tolerance_deg_mix = dist_mix + pitch_mix
-
-        gimbal_control[2] = (abs(yaw) < self.yaw_tolerance_deg_mix and abs(pitch) < self.pitch_tolerance_deg_mix and dist <= self.shootable_dist)
+        if self.spin:
+            gimbal_control[2] = (abs(yaw) < self.yaw_tolerance_deg_mix and abs(pitch) < self.pitch_tolerance_deg_mix, target.dist <= self.shootable_dist and target.target_to_armor_dist <= (armor_list[target.id].diagonal / 2))
+        else:
+            gimbal_control[2] = (abs(yaw) < self.yaw_tolerance_deg_mix and abs(pitch) < self.pitch_tolerance_deg_mix and target.dist <= self.shootable_dist)
 
         return gimbal_control
 
@@ -783,7 +821,7 @@ class Tracker:
             target_muzzle = self.world_to_muzzle(tf, target_cam, self.cam_to_gun_pos, imu_rpy)
             gimbal_control = self.solve_ballistic(tf, target_muzzle, self.cam_to_gun_rpy, imu_rpy)
             gimbal_control = self.gimbal_to_deg(gimbal_control)
-            gimbal_control = self.can_fire(target_cam.dist, gimbal_control)
+            gimbal_control = self.can_fire(target_cam, gimbal_control)
             self.gimbal_control = gimbal_control
 
         # 返回解算结果

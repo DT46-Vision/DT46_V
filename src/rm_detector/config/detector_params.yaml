@@ -7,8 +7,8 @@ rm_detector:
     light_h_w_ratio: 2.0
     light_angle_min: -35
     light_angle_max: 35
-    light_red_ratio: 2.0
-    light_blue_ratio: 2.0
+    light_red_ratio: 1.0
+    light_blue_ratio: 1.0
 
     # ---- 装甲板匹配参数 ----
     height_rate_tol: 1.8
@@ -17,7 +17,7 @@ rm_detector:
     roi_crop: false
     roi_scale: 0.4
     row_stretch: 2.22
-    col_stretch: 0.80
+    col_stretch: 0.6
 
     # ---- 图像处理参数 ----
     binary_val: 120
