@@ -59,8 +59,6 @@ class RmTracker(Node):
         self.declare_parameter('ekf_QR_r_xyz_factor', 0.05)     # EKF QR 参数 - 观测噪声 R 位置观测的动态噪声系数 (距离 * factor)
         self.declare_parameter('ekf_QR_r_yaw', 0.02)            # EKF QR 参数 - 观测噪声 R 偏航角观测的固定方差
         self.declare_parameter('ekf_QR_stable_dist', 1.5)       # EKF QR 状态参数 - 稳定 detection 状态的半径门限 (m)
-        self.declare_parameter('radius_r1', 0.26)               # 旋转半径参数 - r1 (默认一长一短)
-        self.declare_parameter('radius_r2', 0.26)               # 旋转半径参数 - r2
         self.declare_parameter('radius_r_max', 0.4)             # 旋转半径参数 - r_max
         self.declare_parameter('radius_r_min', 0.12)            # 旋转半径参数 - r_min
         self.declare_parameter('system_delay', 0.1)             # 系统延迟
@@ -117,13 +115,9 @@ class RmTracker(Node):
             'stable_dist': ekf_stable_dist
         }
         # [旋转半径参数]
-        radius_r1 = self.get_parameter('radius_r1').value
-        radius_r2 = self.get_parameter('radius_r2').value
         radius_r_max = self.get_parameter('radius_r_max').value
         radius_r_min = self.get_parameter('radius_r_min').value
         radius_params = {
-            'r1': radius_r1,
-            'r2': radius_r2,
             'r_max': radius_r_max,
             'r_min': radius_r_min
         }
@@ -220,16 +214,10 @@ class RmTracker(Node):
             qos_profile_sensor_data
         )
 
-        self.pub_estimate_img = self.create_publisher(
+        self.pub_tracking_state_img = self.create_publisher(
             Image,
-            '/tracker/estimate_img',
-            qos_profile_sensor_data    # <--- 改用 SensorData QoS，替代原有的 10
-        )
-
-        self.pub_yaw_debug_img = self.create_publisher(
-            Image,
-            '/tracker/yaw_debug_img',
-            qos_profile_sensor_data    # <--- 同上
+            '/tracker/tracking_state_img',
+            qos_profile_sensor_data
         )
 
         self.pub_ballistic_img = self.create_publisher(
@@ -336,14 +324,6 @@ class RmTracker(Node):
                 # 3. 滤波器核心参数 (敏感参数，变化必须重置)
                 # -----------------------------------------------------------
                 # 半径模型参数
-                elif name == 'radius_r1':
-                    if self.is_changed(self.tracker.radius_params['r1'], value):
-                        self.tracker.radius_params['r1'] = value
-                        reset_required = True
-                elif name == 'radius_r2':
-                    if self.is_changed(self.tracker.radius_params['r2'], value):
-                        self.tracker.radius_params['r2'] = value
-                        reset_required = True
                 elif name == 'radius_r_max':
                     if self.is_changed(self.tracker.radius_params['r_max'], value):
                         self.tracker.radius_params['r_max'] = value
@@ -597,7 +577,7 @@ class RmTracker(Node):
             # 核心绘制逻辑
             if self.imu_rpy is not None and self.tf.has_camera_info:
                 # 2. 完全无锁渲染：将快照传入新的 display 函数
-                ballistic_img, estimate_img, yaw_debug_img = self.tracker.display_with_snapshot(
+                ballistic_img, tracking_state_img = self.tracker.display_with_snapshot(
                     current_snapshot,
                     self.debug,
                     self.tf,
@@ -608,20 +588,15 @@ class RmTracker(Node):
                 return
 
             # OpenCV -> ROS Image 并发布
-            if estimate_img is not None:
-                out_msg = self.bridge.cv2_to_imgmsg(estimate_img, "bgr8")
+            if tracking_state_img is not None:
+                out_msg = self.bridge.cv2_to_imgmsg(tracking_state_img, "bgr8")
                 out_msg.header = msg.header
-                self.pub_estimate_img.publish(out_msg)
+                self.pub_tracking_state_img.publish(out_msg)
                 
             if ballistic_img is not None:
                 out_msg = self.bridge.cv2_to_imgmsg(ballistic_img, "bgr8")
                 out_msg.header = msg.header
                 self.pub_ballistic_img.publish(out_msg)
-                
-            if yaw_debug_img is not None:
-                out_msg = self.bridge.cv2_to_imgmsg(yaw_debug_img, "bgr8")
-                out_msg.header = msg.header
-                self.pub_yaw_debug_img.publish(out_msg)
 
         except Exception as e:
             self.get_logger().error(f"图像处理回调异常: {e}")

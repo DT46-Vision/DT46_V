@@ -46,8 +46,6 @@ rm_tracker:
     ekf_QR_stable_dist: 1.5
 
     # [车辆物理参数]
-    radius_r1: 0.21             # 车辆半径 1 (m)
-    radius_r2: 0.26              # 车辆半径 2 (m)
     radius_r_max: 0.4              # 车辆最大半径 (m)
     radius_r_min: 0.15              # 车辆最小半径 (m)
 

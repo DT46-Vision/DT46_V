@@ -2,7 +2,7 @@ import numpy as np
 from numba import njit
 import math
 
-@njit(fastmath=True)
+@njit(fastmath=True, nogil=True)
 def _fast_ekf_predict(X, P, F, Q):
     # 将复杂的矩阵运算挪到这里，Numba 会将其编译为机器码
     X_new = F @ X
