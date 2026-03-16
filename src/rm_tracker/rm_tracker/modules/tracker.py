@@ -327,26 +327,19 @@ class Tracker:
         ya = yc - r * np.sin(yaw)
         return np.array([xa, ya, za])
 
-    def orientation_to_yaw(self, yaw):
+    def orientation_to_yaw(self, current_obs_yaw, predicted_yaw):
         """
-        【核心函数】将观测到的离散 yaw (-pi~pi) 转换为连续 yaw (-inf~inf)
-        解决 "小陀螺" 旋转时的角度突变问题
+        基于 EKF 预测姿态进行去卷绕，防止丢帧期间旋转超 180 度导致相位反转
         """
-        # 计算当前观测 yaw 与上一次 yaw 的最短距离
-        diff = shortest_angular_distance(self.last_yaw, yaw)
-
-        # 累加得到连续角度
-        continuous_yaw = self.last_yaw + diff
-
-        # 更新记录
-        self.last_yaw = continuous_yaw
-        return continuous_yaw
+        diff = shortest_angular_distance(predicted_yaw, current_obs_yaw)
+        return predicted_yaw + diff
 
     def handle_armor_jump(self, current_armor):
         """
         处理装甲板跳变 (Switching Armor)
         """
-        yaw = self.orientation_to_yaw(current_armor.yaw)
+        # target_state 此时存储的就是 ekf_prediction
+        yaw = self.orientation_to_yaw(current_armor.yaw, self.target_state[6])
         self.target_state[6] = yaw
 
         # ================== 物理状态修正开始 ==================
@@ -386,7 +379,7 @@ class Tracker:
             if (current_p[0]**2 + current_p[1]**2) > (test_xc**2 + test_yc**2):
                 # 如果法向量反了，同样翻转 yaw
                 yaw += np.pi
-                self.last_yaw = yaw
+                # self.last_yaw = yaw
                 self.target_state[6] = yaw  # 同步更新状态机里的 yaw
 
             self.target_state[0] = current_p[0] + r * np.cos(yaw)
@@ -445,9 +438,9 @@ class Tracker:
                 matched = True
                 # 记录 EKF 观测更新的耗时
                 # 更新观测向量
-                # 注意 1: 必须先处理 Yaw 的连续性
-                cont_yaw = self.orientation_to_yaw(self.tracked_armor.yaw)
-
+                # cont_yaw = self.orientation_to_yaw(self.tracked_armor.yaw)
+                # 使用刚刚计算出的 EKF 预测状态作为基准
+                cont_yaw = self.orientation_to_yaw(self.tracked_armor.yaw, ekf_prediction[6])
                 # 注意 2: 传入装甲板坐标给 EKF Update
                 measurement = np.array([
                     self.tracked_armor.pos[0],
