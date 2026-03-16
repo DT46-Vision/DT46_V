@@ -2,10 +2,43 @@ import math
 import numpy as np
 from .ekf import ExtendedKalmanFilter
 import cv2
+from dataclasses import dataclass
+from typing import List
 
 # 常量定义
 RAD2DEG = 180.0 / math.pi
 DEG2RAD = math.pi / 180.0
+
+@dataclass
+class RobotAppearance:
+    """
+    装甲板外观数据类
+    """
+    __slots__ = ['id', 'armor_width', 'armor_height', 'armor_diagonal', 'robot_r1', 'robot_r2']
+
+    def __init__(self, id, armor_width, armor_height, robot_r1, robot_r2):
+        self.id = id
+        self.armor_width = armor_width
+        self.armor_height = armor_height
+        self.armor_diagonal: float = math.sqrt(self.armor_width ** 2 + self.armor_height ** 2)
+        self.robot_r1 = robot_r1
+        self.robot_r2 = robot_r2
+
+# 使用列表存储所有装甲板外观实例
+robot_list: List[RobotAppearance] = [
+    RobotAppearance(id=0, armor_width=230.0, armor_height=125.0, robot_r1=0.3, robot_r2=0.285),
+    RobotAppearance(id=1, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21),
+    RobotAppearance(id=2, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21),
+    RobotAppearance(id=3, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21),
+    RobotAppearance(id=4, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21),
+    RobotAppearance(id=5, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21),
+    RobotAppearance(id=6, armor_width=230.0, armor_height=125.0, robot_r1=0.3, robot_r2=0.285),
+    RobotAppearance(id=7, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21),
+    RobotAppearance(id=8, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21),
+    RobotAppearance(id=9, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21),
+    RobotAppearance(id=10, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21),
+    RobotAppearance(id=11, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21)
+]
 
 def normalize_angle(angle):
     """
@@ -21,6 +54,7 @@ def shortest_angular_distance(from_rad, to_rad):
     return normalize_angle(to_rad - from_rad)
 
 class ColorPrint:
+    __slots__ = ['PINK', 'CYAN', 'GREEN', 'RED', 'BLUE', 'RESET']
     def __init__(self):
         self.PINK = "\033[38;5;218m"
         self.CYAN = "\033[96m"
@@ -31,10 +65,10 @@ class ColorPrint:
 
 class Armor:
     # 限制允许的属性，省掉 __dict__ 的内存开销
-    __slots__ = ['id', 'pos', 'yaw', 'index', 'dist', 'angle_diff']
+    __slots__ = ['id', 'pos', 'yaw', 'index', 'dist', 'angle_diff', 'target_to_armor_dist']
 
     def __init__(self, id, x, y, z, yaw, index=None):
-        self.id = str(id)
+        self.id = id
         self.pos = np.array([x, y, z])
         self.yaw = yaw
 
@@ -42,6 +76,7 @@ class Armor:
         self.index = index      # 0,1,2,3 (装甲板序号)
         self.dist = np.linalg.norm(self.pos)
         self.angle_diff = 0.0   # 枪口偏离目标的角度
+        self.target_to_armor_dist = 0.0
     def clone(self):
         """
         【关键修复】手写极速克隆，替代耗时百倍的 copy.deepcopy
@@ -49,6 +84,7 @@ class Armor:
         a = Armor(self.id, self.pos[0], self.pos[1], self.pos[2], self.yaw, self.index)
         a.angle_diff = self.angle_diff
         a.dist = self.dist
+        a.target_to_armor_dist = self.target_to_armor_dist
         return a
 
 class Tracker:
@@ -95,7 +131,7 @@ class Tracker:
 
         self.last_yaw = 0.0                                 # 上一帧的连续化 Yaw 角 (用于处理角度跳变与去卷绕)
         self.dz = 0.0                                       # [几何] 当前板与另一组板的高度差 (z轴偏移)
-        self.another_r = 0.26                               # [几何] 另一组装甲板的旋转半径
+        self.another_r = 0.23                               # [几何] 另一组装甲板的旋转半径
 
         self.system_delay = 0.1
 
@@ -246,11 +282,11 @@ class Tracker:
         # 这里初始化QR参数
         self.ekf.init_QR(**self.ekf_QR_params)
         # 注意：这里我们还没有 r，先给个默认值 0.26 (步兵一般是0.2-0.3之间)
-        self.ekf.init_state(xa, ya, za, yaw, self.radius_params['r1'])
+        self.ekf.init_state(xa, ya, za, yaw, robot_list[armor.id].robot_r1)
 
         # 初始化物理参数
         self.dz = 0.0
-        self.another_r = self.radius_params['r2']
+        self.another_r = robot_list[armor.id].robot_r2
         
         self.target_state = self.ekf.X.copy()
 
@@ -557,18 +593,13 @@ class Tracker:
         return robot_armors
 
     def find_target(self, robot_armors, state):
-        """
-        基于预测后的状态选出最佳目标 (Armor 对象)
-        """
-        best_armor = None
+        best_armor = target = None
         min_dist = float('inf')
 
-        # 使用传入的未来状态作为参考中心
         xc, yc = state[0], state[2]
         yaw_center_to_cam = math.atan2(-yc, -xc)
 
         # ---------------- 状态更新：引入退出防抖 ----------------
-        # 判定防抖依然使用真实观测的角速度 (self.ekf.X[7])
         if abs(self.ekf.X[7]) > self.min_spinning_vel:
             self.min_spinning_frame_count += 1
             self.spinning_frame_lost_count = 0 
@@ -582,18 +613,19 @@ class Tracker:
                 if self.spinning_frame_lost_count > self.spinning_frame_lost:
                     self.spin = False
                     self.spinning_frame_lost_count = 0
-
+                    
+        target_to_armor_dist = np.linalg.norm(state[0:2])
+        
         # ---------------- 选板决策 ----------------
         if self.spin:
-            # 小陀螺模式：“打半边”策略
             same_side = []
             for armor in robot_armors:
                 norm_yaw = normalize_angle(armor.yaw)
                 if self.ekf.X[7] >= 0:
-                    if norm_yaw >= 0:
+                    if norm_yaw <= 0:
                         same_side.append(armor)
                 else:
-                    if norm_yaw < 0:
+                    if norm_yaw > 0:
                         same_side.append(armor)
 
             for armor in same_side:
@@ -604,12 +636,25 @@ class Tracker:
                 if dist < min_dist:
                     best_armor = armor
                     min_dist = dist
+            
+            target = best_armor
+            # 【修复】增加非空判断，防止抛出 NoneType 异常
+            if target is not None:
+                # 直接通过 index 判断该装甲板对应的半径
+                if target.index % 2 == 0:
+                    r = self.ekf.X[8]
+                else:
+                    r = self.another_r
+                # 【修复】纠正 sin 和 cos 对应关系以匹配极坐标
+                target.pos[0] = xc - math.cos(yaw_center_to_cam + math.pi) * r
+                target.pos[1] = yc - math.sin(yaw_center_to_cam + math.pi) * r
+                
+                target_to_armor_dist = abs(np.linalg.norm(best_armor.pos - target.pos))
+                target.target_to_armor_dist = target_to_armor_dist
 
         else:
-            # 非小陀螺模式：候选前二，选夹角最小（最正对）
             sorted_armors = sorted(robot_armors, key=lambda armor: np.linalg.norm(armor.pos))
             candidate_armors = sorted_armors[:2] 
-
             min_angle_diff = float('inf') 
 
             for armor in candidate_armors:
@@ -619,10 +664,10 @@ class Tracker:
 
                 if angle_diff < min_angle_diff:
                     min_angle_diff = angle_diff
-                    best_armor = armor
+                    target = armor
 
-        self.target = best_armor
-        return best_armor
+        self.target = target
+        return target
 
     def world_to_muzzle(self, tf, target, offset_pos, imu_rpy):
         """
@@ -712,21 +757,23 @@ class Tracker:
     def gimbal_to_deg(self, gimbal_control):
         return [gimbal_control[0] * RAD2DEG, gimbal_control[1] * RAD2DEG, False]
 
-    def can_fire(self, dist, gimbal_control):
+    def can_fire(self, target, gimbal_control):
         """
         【修改】
         can_fire: bool
         """
         yaw, pitch = gimbal_control[0], gimbal_control[1]
 
-        dist_mix = dist * self.distance_decress_ratio
+        dist_mix = target.dist * self.distance_decress_ratio
         yaw_mix = self.yaw_tolerance_deg * (1 - self.distance_decress_ratio)
         pitch_mix = self.pitch_tolerance_deg * (1 - self.distance_decress_ratio)
 
         self.yaw_tolerance_deg_mix = dist_mix + yaw_mix
         self.pitch_tolerance_deg_mix = dist_mix + pitch_mix
-
-        gimbal_control[2] = (abs(yaw) < self.yaw_tolerance_deg_mix and abs(pitch) < self.pitch_tolerance_deg_mix and dist <= self.shootable_dist)
+        if self.spin:
+            gimbal_control[2] = (abs(yaw) < self.yaw_tolerance_deg_mix and abs(pitch) < self.pitch_tolerance_deg_mix and target.dist <= self.shootable_dist and target.target_to_armor_dist <= (robot_list[target.id].armor_diagonal / 2))
+        else:
+            gimbal_control[2] = (abs(yaw) < self.yaw_tolerance_deg_mix and abs(pitch) < self.pitch_tolerance_deg_mix and target.dist <= self.shootable_dist)
 
         return gimbal_control
 
@@ -783,212 +830,203 @@ class Tracker:
             target_muzzle = self.world_to_muzzle(tf, target_cam, self.cam_to_gun_pos, imu_rpy)
             gimbal_control = self.solve_ballistic(tf, target_muzzle, self.cam_to_gun_rpy, imu_rpy)
             gimbal_control = self.gimbal_to_deg(gimbal_control)
-            gimbal_control = self.can_fire(target_cam.dist, gimbal_control)
+            gimbal_control = self.can_fire(target_cam, gimbal_control)
             self.gimbal_control = gimbal_control
-
+        else:
+            # 【修复】如果没有可用目标，必须清空枪口系目标，防止可视化残留
+            self.muzzle_target = None
         # 返回解算结果
         return gimbal_control, self.log_buffer
 
-    def draw_estimate_with_snapshot(self, snapshot, tf, img, imu_rpy):
-        """
-        绘制 EKF 预测的车辆底盘和装甲板位置。
-        """
-        # 【修正】self.tracker_state -> snapshot['tracker_state']
-        if snapshot['tracker_state'] == self.LOST:
+    def draw_tracking_state_with_snapshot(self, snapshot, tf, img, imu_rpy):
+        # 性能优化：如果既没有处于追踪状态，也没有视觉 Yaw 观测数据，直接返回原图
+        if snapshot['tracker_state'] == self.LOST and not snapshot['debug_yaw_armors']:
             return img
 
         draw = img.copy()
         scale = snapshot['text_size']
 
-        circle_r = max(2, int(5 * scale))
-        marker_size = int(20 * scale)
-        thick_1 = max(1, int(1 * scale))
-        thick_2 = max(1, int(2 * scale))
+        # ================= 第一层：先画 Yaw 观测值 =================
+        if snapshot['debug_yaw_armors']:
+            font_scale = 1.0 * scale
+            thickness = max(1, int(3 * scale))
+            stroke_thickness = thickness + max(1, int(5 * scale))
 
-        x = snapshot['target_state']
-        xc, yc, za = x[0], x[2], x[4]
-        yaw = x[6]
-        r1 = x[8]
-        # 【修正】self.another_r -> snapshot['another_r']
-        # 【修正】self.dz -> snapshot['dz']
-        r2 = snapshot['another_r']
-        dz = snapshot['dz']
+            for armor in snapshot['debug_yaw_armors']:
+                world_pos = armor.pos
+                raw_yaw_rad = armor.yaw
 
-        virtual_armors_pts = []
+                cam_pos = self.world_to_cam(tf, world_pos, imu_rpy)
+                uv, visible = tf.project_point(cam_pos)
 
-        for i in range(4):
-            theta = yaw - i * (math.pi / 2.0)
-            r = r1 if (i % 2 == 0) else r2
-            z = za if (i % 2 == 0) else (za + dz)
+                if visible:
+                    uv_int = (int(uv[0]), int(uv[1]))
+                    yaw_deg = raw_yaw_rad
+                    text = f"{yaw_deg:.1f}"
 
-            ax = xc - r * math.cos(theta)
-            ay = yc - r * math.sin(theta)
+                    (text_w, text_h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+                    text_org = (uv_int[0] - text_w // 2, uv_int[1] + text_h // 2)
 
-            world_pos = np.array([ax, ay, z])
-            cam_pos = self.world_to_cam(tf, world_pos, imu_rpy)
-            uv, visible = tf.project_point(cam_pos)
+                    cv2.putText(draw, text, text_org, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), stroke_thickness)
+                    cv2.putText(draw, text, text_org, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 0, 255), thickness)
 
-            if visible:
-                uv_int = (int(uv[0]), int(uv[1]))
-                color = (0, 255, 0) if i == 0 else (0, 255, 255)
-                cv2.circle(draw, uv_int, circle_r, color, -1)
-                virtual_armors_pts.append(uv_int)
-            else:
-                virtual_armors_pts.append(None)
+        # ================= 第二层：再画 Estimate 预测值（覆盖在上面） =================
+        if snapshot['tracker_state'] != self.LOST:
+            circle_r = max(2, int(5 * scale))
+            marker_size = int(20 * scale)
+            thick_1 = max(1, int(1 * scale))
+            thick_2 = max(1, int(2 * scale))
 
-        center_world = np.array([xc, yc, za + dz/2.0])
-        cam_c = self.world_to_cam(tf, center_world, imu_rpy)
-        uv_c, vis_c = tf.project_point(cam_c)
+            x = snapshot['target_state']
+            xc, yc, za = x[0], x[2], x[4]
+            yaw = x[6]
+            r1 = x[8]
+            r2 = snapshot['another_r']
+            dz = snapshot['dz']
 
-        if vis_c:
-            c_int = (int(uv_c[0]), int(uv_c[1]))
-            cv2.drawMarker(draw, c_int, (255, 255, 255), cv2.MARKER_CROSS, marker_size, thick_2)
+            virtual_armors_pts = []
 
-            line_color = (100, 100, 100)
-            if virtual_armors_pts[0] and virtual_armors_pts[2]:
-                cv2.line(draw, virtual_armors_pts[0], virtual_armors_pts[2], line_color, thick_1)
-            if virtual_armors_pts[1] and virtual_armors_pts[3]:
-                cv2.line(draw, virtual_armors_pts[1], virtual_armors_pts[3], line_color, thick_1)
+            for i in range(4):
+                theta = yaw - i * (math.pi / 2.0)
+                r = r1 if (i % 2 == 0) else r2
+                z = za if (i % 2 == 0) else (za + dz)
 
-            vx, vy = x[1], x[3]
-            speed = math.sqrt(vx**2 + vy**2)
-            if speed > 0.1:
-                end_point_world = np.array([xc + vx * 0.5, yc + vy * 0.5, za])
-                cam_end = self.world_to_cam(tf, end_point_world, imu_rpy)
-                uv_end, vis_end = tf.project_point(cam_end)
+                ax = xc - r * math.cos(theta)
+                ay = yc - r * math.sin(theta)
 
-                if vis_end:
-                    e_int = (int(uv_end[0]), int(uv_end[1]))
-                    cv2.arrowedLine(draw, c_int, e_int, (0, 0, 255), thick_2)
+                world_pos = np.array([ax, ay, z])
+                cam_pos = self.world_to_cam(tf, world_pos, imu_rpy)
+                uv, visible = tf.project_point(cam_pos)
 
-        return draw
+                if visible:
+                    uv_int = (int(uv[0]), int(uv[1]))
+                    color = (0, 255, 0) if i == 0 else (0, 255, 255)
+                    cv2.circle(draw, uv_int, circle_r, color, -1)
+                    virtual_armors_pts.append(uv_int)
+                else:
+                    virtual_armors_pts.append(None)
 
-    def draw_observation_yaw_with_snapshot(self, snapshot, tf, img, imu_rpy):
-        """
-        绘制 process_armors 中提取的观测装甲板的 Yaw 值
-        """
-        # 【修正】self.debug_yaw_armors -> snapshot['debug_yaw_armors']
-        if not snapshot['debug_yaw_armors']:
-            return img
+            center_world = np.array([xc, yc, za + dz/2.0])
+            cam_c = self.world_to_cam(tf, center_world, imu_rpy)
+            uv_c, vis_c = tf.project_point(cam_c)
 
-        draw = img.copy()
-        scale = snapshot['text_size']
+            if vis_c:
+                c_int = (int(uv_c[0]), int(uv_c[1]))
+                cv2.drawMarker(draw, c_int, (255, 255, 255), cv2.MARKER_CROSS, marker_size, thick_2)
 
-        font_scale = 1.0 * scale
-        thickness = max(1, int(3 * scale))
-        stroke_thickness = thickness + max(1, int(5 * scale))
+                line_color = (100, 100, 100)
+                # 【关键修复】：显式判断 is not None，防止隐式 bool 转换引发 OpenCV 连线崩溃
+                if virtual_armors_pts[0] is not None and virtual_armors_pts[2] is not None:
+                    cv2.line(draw, virtual_armors_pts[0], virtual_armors_pts[2], line_color, thick_1)
+                if virtual_armors_pts[1] is not None and virtual_armors_pts[3] is not None:
+                    cv2.line(draw, virtual_armors_pts[1], virtual_armors_pts[3], line_color, thick_1)
 
-        # 【修正】self.debug_yaw_armors -> snapshot['debug_yaw_armors']
-        for armor in snapshot['debug_yaw_armors']:
-            world_pos = armor.pos
-            raw_yaw_rad = armor.yaw
+                vx, vy = x[1], x[3]
+                speed = math.sqrt(vx**2 + vy**2)
+                if speed > 0.1:
+                    end_point_world = np.array([xc + vx * 0.5, yc + vy * 0.5, za])
+                    cam_end = self.world_to_cam(tf, end_point_world, imu_rpy)
+                    uv_end, vis_end = tf.project_point(cam_end)
 
-            cam_pos = self.world_to_cam(tf, world_pos, imu_rpy)
-            uv, visible = tf.project_point(cam_pos)
-
-            if visible:
-                uv_int = (int(uv[0]), int(uv[1]))
-                yaw_deg = raw_yaw_rad
-                text = f"{yaw_deg:.1f}"
-
-                (text_w, text_h), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
-                text_org = (uv_int[0] - text_w // 2, uv_int[1] + text_h // 2)
-
-                cv2.putText(draw, text, text_org, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 0), stroke_thickness)
-                cv2.putText(draw, text, text_org, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 0, 255), thickness)
+                    if vis_end:
+                        e_int = (int(uv_end[0]), int(uv_end[1]))
+                        cv2.arrowedLine(draw, c_int, e_int, (0, 0, 255), thick_2)
 
         return draw
 
-    def draw_ballistic_with_snapshot(self, snapshot, tf, img, imu_rpy):
+    def draw_aiming_hud_with_snapshot(self, snapshot, tf, img, imu_rpy):
         """
-        绘制弹道解算视图
+        绘制瞄准控制与状态信息 (HUD) 视图
         """
         draw = img.copy()
         h, w = draw.shape[:2]
 
-        # 【修正】self.target -> snapshot['target'] 和 snapshot['tracker_state']
+        # ==================== 1. 状态校验 ====================
         if snapshot['target'] is None or snapshot['tracker_state'] == self.LOST:
-            cv2.putText(draw, "SEARCHING...", (w//2 - 80, h//2),
+            cv2.putText(draw, "SEARCHING...", (w // 2 - 80, h // 2),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.8, (150, 150, 150), 2)
             return draw
 
-        # 【修正】self.target.pos -> snapshot['target'].pos
-        tgt_pos_world = snapshot['target'].pos
-
-        cam_tgt = self.world_to_cam(tf, tgt_pos_world, imu_rpy)
+        # ==================== 2. 绘制视觉标识 ====================
+        cam_tgt = self.world_to_cam(tf, snapshot['target'].pos, imu_rpy)
         uv_tgt, vis_tgt = tf.project_point(cam_tgt)
-
         if vis_tgt:
             target_center = (int(uv_tgt[0]), int(uv_tgt[1]))
-            cv2.circle(draw, target_center, 8, (0, 0, 255), -1)
             cv2.circle(draw, target_center, 18, (0, 0, 255), 2)
 
-        # 【修正】self.muzzle_target.pos -> snapshot['muzzle_target'].pos
         if snapshot.get('muzzle_target') is not None:
-            aim_pos_world = snapshot['muzzle_target'].pos
-            aim_pos_cam = self.world_to_cam(tf, aim_pos_world, imu_rpy)
-
+            aim_pos_cam = self.world_to_cam(tf, snapshot['muzzle_target'].pos, imu_rpy)
             uv_aim, vis_aim = tf.project_point(aim_pos_cam)
             if vis_aim:
                 aim_point = (int(uv_aim[0]), int(uv_aim[1]))
                 cv2.drawMarker(draw, aim_point, (0, 255, 0), cv2.MARKER_CROSS, 25, 2)
 
-        # 【修正】self.text_size -> snapshot['text_size']
+        # ==================== 绘制粉色准星 ====================
+        center_x, center_y = w // 2, h // 2
+        crosshair_size = 20 
+        crosshair_thickness = 2
+        pink_color = (255, 0, 255) 
+        cv2.line(draw, (center_x - crosshair_size, center_y), (center_x + crosshair_size, center_y), pink_color, crosshair_thickness)
+        cv2.line(draw, (center_x, center_y - crosshair_size), (center_x, center_y + crosshair_size), pink_color, crosshair_thickness)
+
+        # ==================== 3. 绘制 HUD 信息板 ====================
         scale = snapshot['text_size']
-        start_x_scaled = int(20 * scale)
-        base_y_scaled = int(50 * scale)
-        step_scaled = int(30 * scale)
+        start_x = int(20 * scale)
+        base_y = int(50 * scale)
+        step_y = int(30 * scale)
 
-        font_07 = 0.7 * scale
-        font_08 = 0.8 * scale
-
-        thick_1 = max(1, int(1 * scale))
-        thick_2 = max(1, int(2 * scale))
+        font_normal = 0.7 * scale
+        font_large = 0.8 * scale
+        thick_normal = max(1, int(1 * scale))
+        thick_bold = max(1, int(2 * scale))
 
         dist = snapshot['target'].dist
-        # 【修正】self.target.angle_diff -> snapshot['target'].angle_diff
         angle_diff_deg = snapshot['target'].angle_diff * RAD2DEG
+        yaw_tol = snapshot['yaw_tolerance_deg']
+        pitch_tol = snapshot['pitch_tolerance_deg']
+        
+        # 【关键修复】：确保 float 转换，防止全 0 填充带来的类型崩溃
+        ekf_yaw_vel = float(snapshot['ekf_yaw_vel'])
+        
+        gc = snapshot['gimbal_control'] if snapshot['gimbal_control'] else [0.0, 0.0, False]
+        gc_yaw, gc_pitch, can_fire = float(gc[0]), float(gc[1]), bool(gc[2])
 
-        # 【修正】self.gimbal_control 和 self.spin 处理
-        gc = snapshot['gimbal_control']
-        if gc is None:
-            gc = [0.0, 0.0, False]
+        is_spin = snapshot['spin']
 
-        yaw_tolerance_deg = snapshot['yaw_tolerance_deg']
-        pitch_tolerance_deg = snapshot['pitch_tolerance_deg']
+        color_fire = (0, 255, 0) if can_fire else (0, 0, 255)
+        text_fire = "FIRE ENABLE" if can_fire else "HOLD FIRE"
+        color_spin = (0, 255, 0) if is_spin else (0, 0, 255)
+        text_spin = "SPIN" if is_spin else "NORMAL"
 
-        status_color = (0, 255, 0) if gc[2] else (0, 0, 255)
-        status_text = "FIRE ENABLE" if gc[2] else "HOLD FIRE"
-        spin_status = "SPIN" if snapshot['spin'] else "NORMAL"
-        spin_status_color = (0, 255, 0) if snapshot['spin'] else (0, 0, 255)
-
-        # 【修正】self.ekf.X[7] -> snapshot['ekf_yaw_vel']
-        info_lines = [
-            (f"[{spin_status}]", font_08, spin_status_color, thick_2, 5 * scale),
-            (f"yaw_val: {snapshot['ekf_yaw_vel']:.2f} rad", font_07, (255, 255, 255), thick_1, step_scaled * 1),
-            (f"Dist : {dist:.2f} m", font_07, (255, 255, 255), thick_1, step_scaled * 2),
-            (f"Diff : {angle_diff_deg:.1f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 3),
-            (f"Pitch: {gc[1]:.2f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 4),
-            (f"Yaw  : {gc[0]:.2f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 5),
-            (f"pitch_tol_deg : {pitch_tolerance_deg:.2f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 6),
-            (f"yaw_tol_deg : {yaw_tolerance_deg:.2f} deg", font_07, (255, 255, 255), thick_1, step_scaled * 7),
-            (f"[{status_text}]", font_08, status_color, thick_2, step_scaled * 8 + 5 * scale)
+        hud_lines = [
+            (f"[{text_spin}]", font_large, color_spin, thick_bold, 5 * scale),
+            (f"Yaw Vel: {ekf_yaw_vel:5.2f} rad/s", font_normal, (255, 255, 255), thick_normal, step_y * 1),
+            (f"Dist   : {dist:5.2f} m", font_normal, (255, 255, 255), thick_normal, step_y * 2),
+            (f"Diff   : {angle_diff_deg:5.1f} deg", font_normal, (255, 255, 255), thick_normal, step_y * 3),
+            (f"Pitch  : {gc_pitch:5.2f} deg", font_normal, (255, 255, 255), thick_normal, step_y * 4),
+            (f"Yaw    : {gc_yaw:5.2f} deg", font_normal, (255, 255, 255), thick_normal, step_y * 5),
+            (f"P_Tol  : {pitch_tol:5.2f} deg", font_normal, (255, 255, 255), thick_normal, step_y * 6),
+            (f"Y_Tol  : {yaw_tol:5.2f} deg", font_normal, (255, 255, 255), thick_normal, step_y * 7),
+            (f"[{text_fire}]", font_large, color_fire, thick_bold, step_y * 8 + 5 * scale)
         ]
 
-        for text, font_scale, color, thickness, y_offset in info_lines:
-            pos = (start_x_scaled, int(base_y_scaled + y_offset))
+        for text, font_scale, color, thickness, y_offset in hud_lines:
+            pos = (start_x, int(base_y + y_offset))
             cv2.putText(draw, text, pos, cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, thickness)
 
         return draw
 
+    # 【关键修复】：彻底更新接口，调用上述两张新图的绘制逻辑
     def display_with_snapshot(self, snapshot, flag, tf, cv_img, imu_rpy):
-        estimate_img = None
-        yaw_debug_img = None
-        ballistic_img = self.draw_ballistic_with_snapshot(snapshot,tf, cv_img, imu_rpy)
+        tracking_state_img = None
+        aiming_hud_img = None
+        
+        # 强制调用新名字的函数
         if flag:
-            estimate_img = self.draw_estimate_with_snapshot(snapshot,tf, cv_img, imu_rpy)
-            yaw_debug_img = self.draw_observation_yaw_with_snapshot(snapshot,tf, cv_img, imu_rpy)
-        return ballistic_img, estimate_img, yaw_debug_img
+            tracking_state_img = self.draw_tracking_state_with_snapshot(snapshot, tf, cv_img, imu_rpy)
+        aiming_hud_img = self.draw_aiming_hud_with_snapshot(snapshot, tf, cv_img, imu_rpy)
+            
+        return aiming_hud_img, tracking_state_img
 
     def get_render_snapshot(self):
         """提取当前状态快照，用于无锁渲染"""
@@ -1005,6 +1043,6 @@ class Tracker:
             'yaw_tolerance_deg': self.yaw_tolerance_deg_mix,
             'pitch_tolerance_deg': self.pitch_tolerance_deg_mix,
             'gimbal_control': list(self.gimbal_control) if self.gimbal_control else None,
-            'ekf_yaw_vel': self.ekf.X[7] if self.ekf else 0.0,
+            'ekf_yaw_vel': self.target_state[7],
             'text_size': self.text_size
         }
