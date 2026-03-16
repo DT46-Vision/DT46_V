@@ -19,7 +19,7 @@ def generate_launch_description():
 
     # ---------------- 装甲板追踪参数 ----------------
     tracker_params_file = os.path.join(
-        get_package_share_directory("rm_tracker"), "config", "tracker_params.yaml"
+        get_package_share_directory("rm_tracker"), "config", "tracker_params_sentry.yaml"
     )
 
     # ---------------- rqt 界面配置 ----------------
