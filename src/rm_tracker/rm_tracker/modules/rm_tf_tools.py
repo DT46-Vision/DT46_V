@@ -13,6 +13,15 @@ class RmTF:
         self.cx = 0
         self.cy = 0
 
+        # 缓存 project_point 需要的常量，避免高频创建
+        self._zero_rvec = np.zeros((3, 1), dtype=np.float64)
+        self._origin_3d = np.array([[0.0, 0.0, 0.0]], dtype=np.float64)
+
+        # ==========================================
+        # 【新增】预计算并缓存高频使用的静态旋转矩阵
+        # ==========================================
+        self._cam_to_imu_mat = self._euler_to_mat_xyz_deg([-90.0, 0.0, -90.0])
+        self._imu_to_cam_mat = self._euler_to_mat_zyx_deg([90.0, 0.0, 90.0])
     # 【修改】增加 width 和 height 参数
     def set_camera_info(self, camera_matrix, dist_coeffs, width=640, height=480):
         """
@@ -38,7 +47,36 @@ class RmTF:
         self.cy = ideal_cy
 
         # print(f"【RmTF】已构建虚拟理想相机: cx={self.cx}, cy={self.cy}")
+    # ---------------- 新增：纯 Numpy 矩阵生成方法 ----------------
+    def _euler_to_mat_xyz_deg(self, rpy):
+        """轻量级：欧拉角 (度) 转旋转矩阵 (XYZ顺序)"""
+        r, p, y = np.radians(rpy)
+        Rx = np.array([[1, 0, 0], [0, np.cos(r), -np.sin(r)], [0, np.sin(r), np.cos(r)]])
+        Ry = np.array([[np.cos(p), 0, np.sin(p)], [0, 1, 0], [-np.sin(p), 0, np.cos(p)]])
+        Rz = np.array([[np.cos(y), -np.sin(y), 0], [np.sin(y), np.cos(y), 0], [0, 0, 1]])
+        # XYZ 外旋顺序矩阵连乘
+        return Rz @ Ry @ Rx
 
+    def _euler_to_mat_zyx_deg(self, rpy):
+        """轻量级：欧拉角 (度) 转旋转矩阵 (ZYX顺序)"""
+        # 对于 zyx 顺序，传入的三个元素分别对应 Z, Y, X 轴的旋转角度
+        ang_z, ang_y, ang_x = np.radians(rpy)
+        
+        Rz = np.array([[np.cos(ang_z), -np.sin(ang_z), 0], 
+                       [np.sin(ang_z), np.cos(ang_z), 0], 
+                       [0, 0, 1]])
+                       
+        Ry = np.array([[np.cos(ang_y), 0, np.sin(ang_y)], 
+                       [0, 1, 0], 
+                       [-np.sin(ang_y), 0, np.cos(ang_y)]])
+                       
+        Rx = np.array([[1, 0, 0], 
+                       [0, np.cos(ang_x), -np.sin(ang_x)], 
+                       [0, np.sin(ang_x), np.cos(ang_x)]])
+                       
+        # ZYX 外旋顺序矩阵连乘
+        return Rx @ Ry @ Rz
+    # -------------------------------------------------------------
     def rotate_pose_axis(self, raw_rpy, rotation_rpy, order='xyz'):
         """
         初始化 IMU 姿态
@@ -80,6 +118,8 @@ class RmTF:
 
     def rotate_pos_axis(self, raw_xyz, rotation_rpy, order='xyz'):
         """
+        使用纯 Numpy 矩阵乘法替换 SciPy Rotation，大幅降低高频调用开销
+
         参数:
         raw_xyz      : [x, y, z] 当前在相机坐标系下的位移 (tvec)
         rotation_rpy : [rx, ry, rz] 旋转修正量 (欧拉角)
@@ -88,19 +128,30 @@ class RmTF:
         返回:
         rotated_xyz  : 旋转后的 [x, y, z] 坐标
         """
-        # 1. 把“修正的旋转”变成旋转对象
-        # 这代表了坐标系之间的旋转关系（例如从相机坐标系转到云台坐标系）
-        r_fix = R.from_euler(order, rotation_rpy, degrees=True)
+        pos_vec = np.array(raw_xyz, dtype=np.float64)
 
-        # 2. 将输入转换为 numpy 数组以进行矩阵运算
-        pos_vec = np.array(raw_xyz)
+        # 防御性编程：强制转为 list 比较，防止传入 numpy array 导致多维真值计算报错
+        rpy_list = list(rotation_rpy)
+        
+        # 1. 拦截高频静态变换
+        if order == 'xyz' and rpy_list == [-90.0, 0.0, -90.0]:
+            rot_mat = self._cam_to_imu_mat
+        elif order == 'zyx' and rpy_list == [90.0, 0.0, 90.0]:
+            rot_mat = self._imu_to_cam_mat
+            
+        # 2. 动态变换（如每帧的 IMU 实时角度），走轻量级 Numpy 计算
+        else:
+            if order == 'xyz':
+                rot_mat = self._euler_to_mat_xyz_deg(rotation_rpy)
+            elif order == 'zyx':
+                rot_mat = self._euler_to_mat_zyx_deg(rotation_rpy)
+            else:
+                # 兜底：处理未优化的旋转顺序
+                r_fix = R.from_euler(order, rotation_rpy, degrees=True)
+                return r_fix.apply(pos_vec).tolist()
 
-        # 3. 执行旋转变换
-        # .apply() 会自动处理旋转矩阵与向量的乘法
-        rotated_xyz = r_fix.apply(pos_vec)
-
-        # 4. 转换回列表或保持 numpy 格式返回
-        return rotated_xyz.tolist()
+        # 3. 矩阵点乘并返回列表格式，兼容原有逻辑
+        return rot_mat.dot(pos_vec).tolist()
 
     # 【新增】3D -> 2D 投影函数
     def project_point(self, xyz_cam) -> Tuple[Tuple[int, int], bool]:
@@ -112,27 +163,28 @@ class RmTF:
         if not self.has_camera_info or xyz_cam is None:
             return (0, 0), False
 
+        # 【新增】：如果点在相机光心后方 (Z <= 0)，物理上不可见，直接丢弃
+        # 相机坐标系标准是 Z 轴朝前。给个极小值 1e-3 防止除零风险
+        if xyz_cam[2] <= 1e-3:
+            return (0, 0), False
+        
         # 确保输入是 float64 numpy 数组
         tvec = np.array(xyz_cam, dtype=np.float64).reshape(3, 1)
-
-        # 假设点相对于相机只有位移，没有旋转 (rvec 为 0)
-        # 因为 tvec 已经是点在相机坐标系下的位置了
-        rvec = np.zeros((3, 1), dtype=np.float64)
 
         try:
             # OpenCV 投影函数
             # 参数说明：
-            # 1. objectPoints: 3D点数组。这里设为(0,0,0)，因为我们用 tvec 来表示点的位置
-            # 2. rvec: 旋转向量 (0)
+            # 1. objectPoints: 3D点数组。使用初始化的 self._origin_3d
+            # 2. rvec: 旋转向量 self._zero_rvec
             # 3. tvec: 平移向量 (即点的相机坐标)
             # 4. cameraMatrix: 内参矩阵 K
-            # 5. distCoeffs: 畸变系数 <--- 【关键点：这里必须传进来】
+            # 5. distCoeffs: 畸变系数
             points_2d, _ = cv2.projectPoints(
-                np.array([[0.0, 0.0, 0.0]], dtype=np.float64),
-                rvec,
+                self._origin_3d,
+                self._zero_rvec,
                 tvec,
                 self.camera_matrix,
-                self.dist_coeffs  # <--- 加上这个参数，OpenCV 就会自动处理畸变
+                self.dist_coeffs 
             )
 
             u = int(points_2d[0][0][0])
@@ -153,4 +205,4 @@ if __name__ == '__main__':
     tf = RmTF()
     imu_rpy = [0, 0, 90]
     cam_fix = [0, 0, 180]
-    print(tf.imu_2_cam(raw_rpy = imu_rpy, rotation_rpy = cam_fix, order = 'xyz'))
+    print(tf.rotate_pose_axis(raw_rpy = imu_rpy, rotation_rpy = cam_fix, order = 'xyz'))
