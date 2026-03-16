@@ -646,8 +646,8 @@ class Tracker:
                 else:
                     r = self.another_r
                 # 【修复】纠正 sin 和 cos 对应关系以匹配极坐标
-                target.pos[0] = xc + math.cos(yaw_center_to_cam) * r
-                target.pos[1] = yc + math.sin(yaw_center_to_cam) * r
+                target.pos[0] = xc - math.cos(yaw_center_to_cam + math.pi) * r
+                target.pos[1] = yc - math.sin(yaw_center_to_cam + math.pi) * r
                 
                 target_to_armor_dist = abs(np.linalg.norm(best_armor.pos - target.pos))
                 target.target_to_armor_dist = target_to_armor_dist
