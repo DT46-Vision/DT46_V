@@ -5,12 +5,12 @@ import math
 @njit(fastmath=True, nogil=True)
 def _fast_ekf_predict(X, P, F, Q):
     # 将复杂的矩阵运算挪到这里，Numba 会将其编译为机器码
-    X_new = F @ X
-    P_new = F @ P @ F.T + Q
-    return X_new, P_new
+    # 使用 [:] 强制将计算结果写回传入的原始内存地址,不用反复传值
+    X[:] = F @ X
+    P[:] = F @ P @ F.T + Q
 
-@njit(fastmath=True)
-def _fast_ekf_update(X, P, H, R, Y, I):
+@njit(fastmath=True, nogil=True)
+def _fast_ekf_update_inplace(X, P, H, R, Y, I):
     # 计算 Innovation 协方差 S
     S = H @ P @ H.T + R
     
@@ -23,22 +23,21 @@ def _fast_ekf_update(X, P, H, R, Y, I):
     # 自由度为 4 (x, y, z, yaw) 的卡方分布，99% 置信区间的临界值约为 13.28
     # 如果马氏距离平方大于该阈值，判定为野值，直接拒绝更新，返回纯预测值
     if mahalanobis_sq > 30.0: 
-        # 【关键修复】必须返回 .copy()，保证返回的数组内存布局与新建数组一致
-        # 防止 Numba 因内存特征变化而每一帧都在疯狂重编译
-        return X.copy(), P.copy()
+        # 拒绝更新，返回 False
+        return False
     # ----------------------------------------
 
     # 计算卡尔曼增益 K
     K = np.linalg.solve(S.T, (P @ H.T).T).T
 
     # 更新状态 X
-    X_new = X + K @ Y
+    X[:] = X + K @ Y
 
     # Joseph form 更新 P (保证正定性)
     I_KH = I - K @ H
-    P_new = I_KH @ P @ I_KH.T + K @ R @ K.T
+    P[:] = I_KH @ P @ I_KH.T + K @ R @ K.T
 
-    return X_new, P_new
+    return True
 
 class ExtendedKalmanFilter:
     def __init__(self):
@@ -97,7 +96,7 @@ class ExtendedKalmanFilter:
 
         _fast_ekf_predict(dummy_X, dummy_P, dummy_F, dummy_Q)
 
-        _fast_ekf_update(dummy_X, dummy_P, dummy_H, dummy_R, dummy_Y, dummy_I)
+        _fast_ekf_update_inplace(dummy_X, dummy_P, dummy_H, dummy_R, dummy_Y, dummy_I)
 
     def init_QR(self, q_xyz=20.0, q_yaw=100.0, q_r=800.0, r_xyz_factor=0.05, r_yaw=0.02, stable_dist = 1.5):
         self.s2qxyz = q_xyz
@@ -185,10 +184,9 @@ class ExtendedKalmanFilter:
         self.Q[8,8] = t2 * self.s2qr
 
         # 3. 执行预测
-        # 注意：这里矩阵乘法 @ 仍然会产生临时的中间大矩阵，
-        # 但相比反复 malloc Q和F，性能开销已经大幅降低。
-        self.X, self.P = _fast_ekf_predict(self.X, self.P, self.F, self.Q)
-
+        # 直接调用即可，原内存已被修改，不需要也不应该接收返回值。
+        # 同时注意上面你定义的函数名是 _fast_ekf_predict，这里少敲了后缀或者上面没加后缀，要保持统一，这里按你上面定义的来
+        _fast_ekf_predict(self.X, self.P, self.F, self.Q)
         return self.X
 
     def update(self, measurement):
@@ -265,10 +263,9 @@ class ExtendedKalmanFilter:
         Y = Z - Z_pred
 
         # 5. 标准卡尔曼更新 (调用 Numba 加速函数)
-        self.X, self.P = _fast_ekf_update(self.X, self.P, self.H, self.R, Y, self.I)
-
+        _fast_ekf_update_inplace(self.X, self.P, self.H, self.R, Y, self.I)
+        
         return self.X
-
     def smooth_reset_covariance(self):
         # ================== 协方差软重置 ==================
         # 适度放大位置和角度的方差，让滤波器在跳变后几帧稍微更信任观测
