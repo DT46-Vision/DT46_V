@@ -5,6 +5,5 @@
         "--clang-tidy",
         "--header-insertion=never"
     ],
-    "cmake.ignoreCMakeListsMissing": true,
-    "idf.pythonInstallPath": "/usr/bin/python3"
+    "cmake.ignoreCMakeListsMissing": true
 }
