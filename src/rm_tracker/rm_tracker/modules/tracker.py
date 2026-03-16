@@ -640,15 +640,15 @@ class Tracker:
             target = best_armor
             # 【修复】增加非空判断，防止抛出 NoneType 异常
             if target is not None:
+                # 直接通过 index 判断该装甲板对应的半径
+                if target.index % 2 == 0:
+                    r = self.ekf.X[8]
+                else:
+                    r = self.another_r
                 # 【修复】纠正 sin 和 cos 对应关系以匹配极坐标
-                target.pos[0] = xc + math.cos(yaw_center_to_cam) * self.ekf.X[8]
-                target.pos[1] = yc + math.sin(yaw_center_to_cam) * self.ekf.X[8]
+                target.pos[0] = xc + math.cos(yaw_center_to_cam) * r
+                target.pos[1] = yc + math.sin(yaw_center_to_cam) * r
                 
-                if target.pos[2] >= self.ekf.X[4]:
-                    target.pos[2] -= self.dz
-                elif target.pos[2] < self.ekf.X[4]:
-                    target.pos[2] += self.dz
-
                 target_to_armor_dist = abs(np.linalg.norm(best_armor.pos - target.pos))
                 target.target_to_armor_dist = target_to_armor_dist
 
