@@ -28,22 +28,22 @@ rm_tracker:
     cam_to_gun_rpy_y: 0.0
 
     # [逻辑与阈值]
-    dist_tol: 0.05              # 预处理：两块板距离容差 (m)
+    dist_tol: 0.10              # 预处理：两块板距离容差 (m)
     max_match_distance: 0.2     # 匹配：最大距离阈值 (m)
     max_match_yaw_diff: 57.0     # 匹配：判定跳变的 Yaw 差值 (deg)
     jump_cooldown_max: 20
     tracking_thres: 5           # 连续检测帧数 (进入 TRACKING) - int
-    lost_thres: 10              # 连续丢失帧数 (进入 LOST) - int
+    lost_thres: 20              # 连续丢失帧数 (进入 LOST) - int
 
     # [EKF Q/R 参数] - 参考此前代码中的调优值
-    ekf_QR_q_xyz: 120.0          # Process Noise Q: 位置/速度
-    ekf_QR_q_yaw: 100.0         # Process Noise Q: 偏航角
+    ekf_QR_q_xyz: 200.0          # Process Noise Q: 位置/速度
+    ekf_QR_q_yaw: 150.0         # Process Noise Q: 偏航角
     ekf_QR_q_r: 0.5           # Process Noise Q: 半径 (给大一点允许快速变径)
 
-    ekf_QR_r_xyz_factor: 0.005   # Measurement Noise R: 位置因子
-    ekf_QR_r_yaw: 0.02          # Measurement Noise R: 角度方差
+    ekf_QR_r_xyz_factor: 0.5   # Measurement Noise R: 位置因子
+    ekf_QR_r_yaw: 0.002          # Measurement Noise R: 角度方差
 
-    ekf_QR_stable_dist: 1.5
+    ekf_QR_stable_dist: 1.4
 
     # [车辆物理参数]
     radius_r_max: 0.4              # 车辆最大半径 (m)
@@ -54,7 +54,7 @@ rm_tracker:
     # 反小陀螺
     max_spinning_frame: 10
     spinning_frame_lost: 5
-    min_spinning_vel: 2.5
+    min_spinning_vel: 1.0
 
     # [发射参数]
     bullet_speed: 28.0            # 弹速 (m/s)
