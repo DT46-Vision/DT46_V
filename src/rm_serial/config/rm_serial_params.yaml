@@ -1,7 +1,11 @@
-rm_serial:
-  ros__parameters:
-    device_name: "/dev/ttyACM0"
-    baud_rate: 115200
-    flow_control: "none"
-    parity: "none"
-    stop_bits: "1"
+serial_node:
+    ros__parameters:
+        port_name: "/dev/ttyACM0"
+        baudrate: 115200
+        timeout: 1.0
+        write_timeout: 1.0
+        flow_control: "none"          # 流控方式 (none/hardware/software)
+        parity: "none"                # 校验位 (none/even/odd)
+        stop_bits: "1"                # 停止位 (1/1.5/2)
+        serial_receive_header: 0xA5
+        serial_send_header: 0x5A
