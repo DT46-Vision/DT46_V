@@ -1,17 +1,17 @@
 image_width: 1440
-image_height: 700
-camera_name: narrow_stereo
+image_height: 1080
+camera_name: hik_camera
 camera_matrix:
   rows: 3
   cols: 3
-  data: [1408.23638,    0.     ,  682.89773,
-            0.     , 1408.26157,  368.2152 ,
+  data: [1420.95527,    0.     ,  680.96336,
+            0.     , 1420.36124,  554.10444,
             0.     ,    0.     ,    1.     ]
 distortion_model: plumb_bob
 distortion_coefficients:
   rows: 1
   cols: 5
-  data: [-0.404966, 0.212048, -0.000993, 0.000207, 0.000000]
+  data: [-0.399800, 0.201011, -0.000566, -0.000099, 0.000000]
 rectification_matrix:
   rows: 3
   cols: 3
@@ -21,6 +21,6 @@ rectification_matrix:
 projection_matrix:
   rows: 3
   cols: 4
-  data: [1251.48208,    0.     ,  674.3569 ,    0.     ,
-            0.     , 1371.96272,  368.91559,    0.     ,
+  data: [1266.13956,    0.     ,  671.50854,    0.     ,
+            0.     , 1334.67636,  555.575  ,    0.     ,
             0.     ,    0.     ,    1.     ,    0.     ]

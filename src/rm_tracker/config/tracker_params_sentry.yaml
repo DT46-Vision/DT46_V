@@ -49,7 +49,7 @@ rm_tracker:
     radius_r_max: 0.4              # 车辆最大半径 (m)
     radius_r_min: 0.15              # 车辆最小半径 (m)
 
-    system_delay: 0.1
+    system_delay: 0.01
 
     # 反小陀螺
     max_spinning_frame: 10
@@ -57,10 +57,10 @@ rm_tracker:
     min_spinning_vel: 1.0
 
     # [发射参数]
-    bullet_speed: 28.0            # 弹速 (m/s)
+    bullet_speed: 32.0            # 弹速 (m/s)
 
     # 发弹角度阈值
-    shootable_dist: 3.0
+    shootable_dist: 10.0
     distance_decress_ratio: 0.60
     yaw_tolerance_deg: 5.0     # 允许发射的 yaw 角度阈值
     pitch_tolerance_deg: 5.0   # 允许发射的 pitch 角度阈值
