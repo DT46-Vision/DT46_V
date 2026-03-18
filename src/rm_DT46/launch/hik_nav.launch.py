@@ -18,8 +18,12 @@ def generate_launch_description():
     )
 
     # ---------------- 装甲板追踪参数 ----------------
-    tracker_params_file = os.path.join(
+    tracker_params_sentry_file = os.path.join(
         get_package_share_directory("rm_tracker"), "config", "tracker_params_sentry.yaml"
+    )
+
+    dm_imu_params_file = os.path.join(
+        get_package_share_directory("dm_imu"), "config", "dm_imu_params.yaml"
     )
 
     # ---------------- rqt 界面配置 ----------------
@@ -33,7 +37,18 @@ def generate_launch_description():
         DeclareLaunchArgument(name="camera_info_url", default_value=camera_info_url),
         DeclareLaunchArgument(name="use_sensor_data_qos", default_value="false"),
         DeclareLaunchArgument(name="detector_params_file", default_value=detector_params_file),
-        DeclareLaunchArgument(name="tracker_params_file", default_value=tracker_params_file),
+        DeclareLaunchArgument(name="tracker_params_sentry_file", default_value=tracker_params_sentry_file),
+        DeclareLaunchArgument(name="dm_imu_params_file", default_value=dm_imu_params_file),
+
+        # ----------- 启动dm_imu节点 -----------
+        Node(
+            package="dm_imu",
+            executable="dm_imu_node",
+            name="dm_imu",
+            output="screen",
+            emulate_tty=True,
+            parameters=[LaunchConfiguration("dm_imu_params_file")],
+        ),
 
         # ----------- 启动装甲板检测节点 -----------
         Node(
@@ -52,7 +67,7 @@ def generate_launch_description():
             name="rm_tracker",
             output="screen",
             emulate_tty=True,
-            parameters=[LaunchConfiguration("tracker_params_file")],
+            parameters=[LaunchConfiguration("tracker_params_sentry_file")],
         ),
 
         # ----------- 启动海康相机节点 -----------

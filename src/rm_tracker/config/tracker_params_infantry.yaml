@@ -8,7 +8,7 @@ rm_tracker:
     # 陀螺仪到相机 (IMU -> Cam) 旋转标定
     rotation_rpy_r: 0.0
     rotation_rpy_p: 0.0
-    rotation_rpy_y: 0.0
+    rotation_rpy_y: -180.0
 
     show_rpy: false             # 是否打印 IMU 调试信息
     debug: false
@@ -16,16 +16,16 @@ rm_tracker:
     display: false           # 是否显示 OpenCV 调试图像
 
     # ----------------------- TRACKER ---------------------
-    target_color: 1             # 0: RED, 1: BLUE (当前要打的敌人颜色)
+    target_color: 0             # 0: RED, 1: BLUE (当前要打的敌人颜色)
 
     # [外参] 相机 -> 枪口 (Camera to Gun) (x:右, y:下, z:前)
     # 注意：单位是米 (m) 和 弧度 (rad)
     cam_to_gun_pos_x: 0.0       # 你的代码默认是 10.0，建议改为实际测量值，例如 0.0
-    cam_to_gun_pos_y: -0.07     # 假设相机在枪管上方 12cm
+    cam_to_gun_pos_y: 0.084     # 假设相机在枪管上方 12cm
     cam_to_gun_pos_z: 0.0
     cam_to_gun_rpy_r: 0.0
     cam_to_gun_rpy_p: 0.0
-    cam_to_gun_rpy_y: 0.0
+    cam_to_gun_rpy_y: -1.0
 
     # [逻辑与阈值]
     dist_tol: 0.10              # 预处理：两块板距离容差 (m)
@@ -49,7 +49,7 @@ rm_tracker:
     radius_r_max: 0.4              # 车辆最大半径 (m)
     radius_r_min: 0.15              # 车辆最小半径 (m)
 
-    system_delay: 0.1
+    system_delay: 0.01
 
     # 反小陀螺
     max_spinning_frame: 10
@@ -57,10 +57,10 @@ rm_tracker:
     min_spinning_vel: 1.0
 
     # [发射参数]
-    bullet_speed: 28.0            # 弹速 (m/s)
+    bullet_speed: 30.0            # 弹速 (m/s)
 
     # 发弹角度阈值
-    shootable_dist: 3.0
+    shootable_dist: 10.0
     distance_decress_ratio: 0.60
     yaw_tolerance_deg: 5.0     # 允许发射的 yaw 角度阈值
     pitch_tolerance_deg: 5.0   # 允许发射的 pitch 角度阈值
