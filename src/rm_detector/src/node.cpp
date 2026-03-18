@@ -390,7 +390,7 @@ namespace DT46_VISION {
         // ---- ROS 通道
         rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr        sub_image_;
         rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr   sub_camera_info_;
-        rclcpp::Publisher<rm_interfaces::msg::ArmorsMsg>::SharedPtr  publisher_armors_;
+        rclcpp::Publisher<rm_interfaces::msg::ArmorsMsg>::SharedPtr     publisher_armors_;
         rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr           publisher_result_img_;
         rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr           publisher_armor_img_;
         rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr           publisher_armor_processed_img_;

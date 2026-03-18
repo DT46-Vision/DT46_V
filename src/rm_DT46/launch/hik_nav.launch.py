@@ -13,8 +13,8 @@ def generate_launch_description():
     camera_info_url = "package://hik_camera/config/camera_info.yaml"
 
     # ---------------- 装甲板检测参数 ----------------
-    detector_params_file = os.path.join(
-        get_package_share_directory("rm_detector"), "config", "detector_params.yaml"
+    detector_params_sentry_file = os.path.join(
+        get_package_share_directory("rm_detector"), "config", "detector_params_sentry.yaml"
     )
 
     # ---------------- 装甲板追踪参数 ----------------
@@ -36,7 +36,7 @@ def generate_launch_description():
         DeclareLaunchArgument(name="params_file", default_value=params_file),
         DeclareLaunchArgument(name="camera_info_url", default_value=camera_info_url),
         DeclareLaunchArgument(name="use_sensor_data_qos", default_value="false"),
-        DeclareLaunchArgument(name="detector_params_file", default_value=detector_params_file),
+        DeclareLaunchArgument(name="detector_params_sentry_file", default_value=detector_params_sentry_file),
         DeclareLaunchArgument(name="tracker_params_sentry_file", default_value=tracker_params_sentry_file),
         DeclareLaunchArgument(name="dm_imu_params_file", default_value=dm_imu_params_file),
 
@@ -57,7 +57,7 @@ def generate_launch_description():
             name="rm_detector",
             output="screen",
             emulate_tty=True,
-            parameters=[LaunchConfiguration("detector_params_file")],
+            parameters=[LaunchConfiguration("detector_params_sentry_file")],
         ),
 
         # ----------- 启动装甲板追踪节点 -----------
