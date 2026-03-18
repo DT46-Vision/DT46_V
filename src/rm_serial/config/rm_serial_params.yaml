@@ -1,6 +1,6 @@
 rm_serial:
     ros__parameters:
-        port_name: "/dev/ttyACM1"
+        port_name: "/dev/ttyPortMCU"
         baudrate: 115200
         timeout: 1.0
         write_timeout: 1.0
