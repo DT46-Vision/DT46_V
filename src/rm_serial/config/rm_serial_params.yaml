@@ -9,3 +9,4 @@ serial_node:
         stop_bits: "1"                # 停止位 (1/1.5/2)
         serial_receive_header: 0xA5
         serial_send_header: 0x5A
+        pub_rpy: false

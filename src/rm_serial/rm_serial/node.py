@@ -28,7 +28,7 @@ class SerialNode(Node):
         self.lock = threading.Lock()
         self.serial_lock = threading.Lock()
         self.is_reconnecting = False
-        
+
         # 创建qos
         qos = QoSProfile(
             reliability=ReliabilityPolicy.RELIABLE,
@@ -36,9 +36,9 @@ class SerialNode(Node):
             depth=50,
             durability=DurabilityPolicy.VOLATILE,
         )
-        
+
         self.get_params()
-        
+
         self.pub_uart_receive_decision = self.create_publisher(Decision, "/nav/decision", 10)
         self.sub_gimbal_control = self.create_subscription(GimbalControl, "tracker/gimbal_control", self.gimbal_control_callback, qos_profile_sensor_data)
         self.pub_uart_receive_imu = self.create_publisher(Vector3Stamped, '/imu/rpy', qos)
@@ -47,6 +47,8 @@ class SerialNode(Node):
 
         self.serial_receive_header = 0xA5
         self.serial_send_header = 0x5A
+
+        self.pub_rpy = False
 
         # 初始化串口
         try:
@@ -58,32 +60,33 @@ class SerialNode(Node):
             )
             if self.serial.is_open:
                 self.get_logger().info(f"串口已打开: {self.port_name}")
-                
+
                 # 启动接收线程
-                self.receive_thread = threading.Thread(target=self.receive_data, daemon=True)  
+                self.receive_thread = threading.Thread(target=self.receive_data, daemon=True)
                 self.receive_thread.start()
-                
+
                 # 启动独立的发送线程 (替代原来的 create_timer)
                 self.send_thread = threading.Thread(target=self.send_data_loop, daemon=True)
                 self.send_thread.start()
-                
+
         except serial.SerialException as e:
             self.get_logger().error(f"创建串口时出错: {self.port_name} - {str(e)}")
-            raise e    
-            
+            raise e
+
     def get_params(self):
         self.declare_parameters(
             namespace='',
             parameters=[
                 ('port_name', '/dev/ttyACM0'),
                 ('baudrate', 115200),
-                ('timeout', 1.0),            
-                ('write_timeout', 1.0),      
+                ('timeout', 1.0),
+                ('write_timeout', 1.0),
                 ('flow_control', 'none'),
                 ('parity', 'none'),
                 ('stop_bits', '1'),
                 ('serial_receive_header', 0xA5),
-                ('serial_send_header', 0x5A)
+                ('serial_send_header', 0x5A),
+                ('pub_rpy', False)
             ]
         )
 
@@ -96,6 +99,7 @@ class SerialNode(Node):
         self.stop_bits = self.get_parameter("stop_bits").value
         self.serial_receive_header = self.get_parameter("serial_receive_header").value
         self.serial_send_header = self.get_parameter("serial_send_header").value
+        self.pub_rpy = self.get_parameter("pub_rpy").value
 
         self.get_logger().info("-" * 30)
         self.get_logger().info("串口参数配置已加载:")
@@ -104,8 +108,8 @@ class SerialNode(Node):
         self.get_logger().info(f"  超时设置: Read={self.timeout}s, Write={self.write_timeout}s")
         self.get_logger().info(f"  校验/流控: Parity={self.parity}, Flow={self.flow_control}")
         self.get_logger().info("-" * 30)
- 
-    def gimbal_control_callback(self,msg):
+
+    def gimbal_control_callback(self, msg):
         with self.lock:
             self.send_datas.pitch = msg.pitch
             self.send_datas.yaw = msg.yaw
@@ -114,7 +118,7 @@ class SerialNode(Node):
     def receive_data(self):
         packet_length = 16
         self.get_logger().info("接收数据线程已启动 (CRC16 Mode - 16 Bytes)")
-        
+
         try:
             self.serial.reset_input_buffer()
         except Exception:
@@ -137,20 +141,21 @@ class SerialNode(Node):
 
                 received_crc = struct.unpack('<H', checksum_bytes)[0]
                 calculated_crc = get_crc16_check_sum(data_payload)
-                
+
                 if calculated_crc != received_crc:
                     continue
 
                 _, detect_color, roll, pitch, yaw = struct.unpack("<BBfff", data_payload)
 
-                # 发布 IMU 消息
-                rpy_msg = Vector3Stamped()
-                rpy_msg.header.stamp = self.get_clock().now().to_msg()
-                rpy_msg.header.frame_id = 'imu_link'
-                rpy_msg.vector.x = float(roll)
-                rpy_msg.vector.y = float(pitch)
-                rpy_msg.vector.z = float(yaw)
-                self.pub_uart_receive_imu.publish(rpy_msg)
+                if self.pub_rpy:
+                    # 发布 IMU 消息
+                    rpy_msg = Vector3Stamped()
+                    rpy_msg.header.stamp = self.get_clock().now().to_msg()
+                    rpy_msg.header.frame_id = 'imu_link'
+                    rpy_msg.vector.x = float(roll)
+                    rpy_msg.vector.y = float(pitch)
+                    rpy_msg.vector.z = float(yaw)
+                    self.pub_uart_receive_imu.publish(rpy_msg)
 
                 # 发布 Decision 消息
                 serial_decision_msg = Decision()
@@ -183,16 +188,16 @@ class SerialNode(Node):
                     yaw = float(self.send_datas.yaw)
                     pitch = float(self.send_datas.pitch)
                     can_fire = int(self.send_datas.can_fire)
-                    
+
                 header = self.serial_send_header
 
                 # 帧头(1), 云台yaw(4), 云台pitch(4), 开火(4)
                 data_payload = struct.pack(
                     '<Bffi',
                     header,
-                    yaw, 
-                    pitch, 
-                    can_fire, 
+                    yaw,
+                    pitch,
+                    can_fire,
                 )
 
                 checksum = get_crc16_check_sum(data_payload)
@@ -207,18 +212,18 @@ class SerialNode(Node):
     def reopen_port(self):
         with self.serial_lock:
             if self.is_reconnecting:
-                return 
+                return
             self.is_reconnecting = True
 
         self.get_logger().warn("正在重连串口...")
-        
+
         while rclpy.ok():
             try:
                 # 在重新实例化之前获取锁，确保发送线程不会在实例化过程中引发崩溃
                 with self.serial_lock:
                     if hasattr(self, 'serial') and self.serial and self.serial.is_open:
                         self.serial.close()
-                    
+
                     self.serial = serial.Serial(
                         port=self.port_name,
                         baudrate=self.baudrate,
@@ -226,8 +231,8 @@ class SerialNode(Node):
                         write_timeout=1,
                     )
                 self.get_logger().info("串口重连成功")
-                break 
-                
+                break
+
             except serial.SerialException as e:
                 self.get_logger().error(f"串口重连失败，1秒后重试: {str(e)}")
                 time.sleep(1)
