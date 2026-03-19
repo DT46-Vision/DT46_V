@@ -66,6 +66,7 @@ class RmTracker(Node):
         self.declare_parameter('spinning_frame_lost', 5)        # 小陀螺丢失帧数门限
         self.declare_parameter('min_spinning_vel', 2.5)         # 旋转速度
         self.declare_parameter('bullet_speed', 28.0)            # 子弹速度
+        self.declare_parameter('k_v2', 0.019)            # 平方阻力系数
         self.declare_parameter('shootable_dist', 3.0)           # 允许发射的子弹距离阈值
         self.declare_parameter('distance_decress_ratio', 0.60)  # 距离缩减比例
         self.declare_parameter('yaw_tolerance_deg', 5.0)        # 允许发射的 yaw 角度阈值
@@ -127,6 +128,7 @@ class RmTracker(Node):
         spinning_frame_lost = self.get_parameter('spinning_frame_lost').value
         min_spinning_vel = self.get_parameter('min_spinning_vel').value
         bullet_speed = self.get_parameter('bullet_speed').value
+        k_v2 = self.get_parameter('k_v2').value
         # 发弹判断
         shootable_dist = self.get_parameter('shootable_dist').value
         distance_decress_ratio = self.get_parameter('distance_decress_ratio').value
@@ -151,6 +153,7 @@ class RmTracker(Node):
         self.tracker.spinning_frame_lost = spinning_frame_lost
         self.tracker.min_spinning_vel = min_spinning_vel
         self.tracker.bullet_speed = bullet_speed
+        self.tracker.k_v2 = k_v2
         self.tracker.shootable_dist = shootable_dist
         self.tracker.distance_decress_ratio = distance_decress_ratio
         self.tracker.yaw_tolerance_deg = yaw_tolerance_deg
@@ -386,6 +389,11 @@ class RmTracker(Node):
                 elif name == 'bullet_speed':
                     if self.is_changed(self.tracker.bullet_speed, value):
                         self.tracker.bullet_speed = value
+                        reset_required = False
+                
+                elif name == 'k_v2':
+                    if self.is_changed(self.tracker.k_v2, value):
+                        self.tracker.k_v2 = value
                         reset_required = False
                 
                 # 发弹判断

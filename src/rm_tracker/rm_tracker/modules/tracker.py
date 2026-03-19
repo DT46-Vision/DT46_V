@@ -28,7 +28,7 @@ class RobotAppearance:
 robot_list: List[RobotAppearance] = [
     RobotAppearance(id=0, armor_width=230.0, armor_height=125.0, robot_r1=0.3, robot_r2=0.285), # 红 1
     RobotAppearance(id=1, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21),
-    RobotAppearance(id=2, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21), # 红 3
+    RobotAppearance(id=2, armor_width=135.0, armor_height=125.0, robot_r1=0.3, robot_r2=0.27), # 红 3
     RobotAppearance(id=3, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21),
     RobotAppearance(id=4, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21),
     RobotAppearance(id=5, armor_width=135.0, armor_height=125.0, robot_r1=0.24, robot_r2=0.22), # 红 哨
@@ -146,6 +146,7 @@ class Tracker:
 
         self.target = None                                  # 最终解算出的目标状态
         self.bullet_speed = 28.0                            # 弹道速度 (m/s)
+        self.k_v2 = 0.019                                   # 平方阻力系数
         self.muzzle_target = None                           # 弹道解算后的目标点
 
         self.shootable_dist = 3.0                           # [弹道] 允许发射的弹道距离阈值 (m)
@@ -696,52 +697,76 @@ class Tracker:
 
     def solve_ballistic(self, tf, muzzle_target, cam_to_gun_rpy, imu_rpy):
         """
-        基于当前位姿逆解的弹道解算 (Iterative Method)
+        基于平方空气阻力模型 (F = -kv^2) 的数值积分打靶法弹道解算
         """
-        bullet_speed = self.bullet_speed
-
-        if muzzle_target is None or bullet_speed < 1e-3:
+        if muzzle_target is None or self.bullet_speed < 1e-3:
             return [0.0, 0.0, False]
 
-        # 1. 提取惯性系坐标 (原点在枪口，XYZ轴与世界系平行)
         x, y, z = muzzle_target.pos
-        dist_h = math.sqrt(x**2 + y**2)
+        dist_h = math.sqrt(x**2 + y**2) # 水平面距离
 
         if dist_h < 0.1 or dist_h > 12.0 or math.isnan(dist_h):
             return [0.0, 0.0, False]
 
+        v_init = self.bullet_speed
         g = 9.81
-        v = bullet_speed
-        k = 0.035
+        
+        # 【注意】这里的 k 是平方阻力系数 ( k = 0.5 * rho * C_d * A / m )
+        # 它的物理量纲和数值与你之前的线性 k (0.035) 完全不同。
+        # 对于 17mm 弹丸，通常在 0.015 到 0.025 之间，需要实车重新微调。
+        k_v2 = self.k_v2 # 0.019
 
-        # 2. 迭代求解补偿重力后的高度 (完全在物理惯性系下计算)
-        target_pitch_rad = math.atan2(z, dist_h)
+        # 初始猜测：直线瞄准角
+        pitch_rad = math.atan2(z, dist_h)
+        
+        # 打靶法迭代 (最多迭代 5 次)
         for i in range(5):
-            cos_theta = math.cos(target_pitch_rad)
-            if cos_theta < 1e-4: cos_theta = 1e-4
+            sim_x = 0.0
+            sim_z = 0.0
+            v_x = v_init * math.cos(pitch_rad)
+            v_z = v_init * math.sin(pitch_rad)
+            
+            dt = 0.005 # 积分时间步长：5 毫秒
+            t = 0.0
+            
+            # 欧拉法数值积分，模拟子弹飞行
+            while sim_x < dist_h and t < 2.0:
+                v = math.sqrt(v_x**2 + v_z**2)
+                
+                # 分解加速度 (a = F/m = -k * v * v_axis)
+                a_x = -k_v2 * v * v_x
+                a_z = -g - k_v2 * v * v_z
+                
+                # 更新位置与速度
+                sim_x += v_x * dt
+                sim_z += v_z * dt
+                v_x += a_x * dt
+                v_z += a_z * dt
+                t += dt
+                
+            # 计算落点高度误差
+            z_error = z - sim_z
+            
+            # 如果误差小于 5mm，认为已经命中，退出迭代
+            if abs(z_error) < 0.005:
+                break
+                
+            # 根据误差微调发射仰角 (简单的比例补偿)
+            pitch_rad += z_error / dist_h
 
-            if k > 1e-5:
-                t = (math.exp(k * dist_h) - 1) / (k * v * cos_theta)
-            else:
-                t = dist_h / (v * cos_theta)
-
-            y_drop = 0.5 * g * t**2
-            z_aim = z + y_drop
-            target_pitch_rad = math.atan2(z_aim, dist_h)
-
-        # 3. 构造补偿重力后的“虚拟瞄准点” (惯性系坐标)
+        # 此时的 pitch_rad 已经是补偿重力和空气阻力后的绝对发射仰角
+        # 通过三角函数反推出一个没有重力的“虚拟瞄准点”
+        z_aim = dist_h * math.tan(pitch_rad)
         aim_point_world = np.array([x, y, z_aim])
 
-        # 4. 【核心逻辑】直接调用你的辅助函数，逆解回当前的相机坐标系
+        # 逆解回相机坐标系
         aim_point_cam = self.world_to_cam(tf, aim_point_world, imu_rpy)
 
-        # 5. 在相机坐标系下直接求取角度增量 (Delta)
-        # 相机系标准定义：Z轴向前，X轴向右，Y轴向下
-        # 计算所需的偏航和俯仰增量 (可根据云台电机的正负极性在此处加负号)
+        # 在相机坐标系下计算最终输出的角度增量
         delta_yaw = math.atan2(aim_point_cam[0], aim_point_cam[2])
         delta_pitch = math.atan2(aim_point_cam[1], aim_point_cam[2])
 
-        # 6. 加上机械安装补偿 (修正枪管与相机的固有静态偏差)
+        # 加上机械外参补偿
         delta_yaw += cam_to_gun_rpy[2] * DEG2RAD
         delta_pitch += cam_to_gun_rpy[1] * DEG2RAD
 
@@ -751,22 +776,33 @@ class Tracker:
         return [gimbal_control[0] * RAD2DEG, gimbal_control[1] * RAD2DEG, False]
 
     def can_fire(self, target, gimbal_control):
-        """
-        【修改】
-        can_fire: bool
-        """
         yaw, pitch = gimbal_control[0], gimbal_control[1]
+        
+        # 获取当前装甲板的物理尺寸 (米)
+        armor_w = robot_list[target.id].armor_width / 1000.0
+        armor_h = robot_list[target.id].armor_height / 1000.0
+        
+        # 动态计算物理允许的角度偏差界限 (弧度转角度)
+        # 留出一定的缩放冗余 (例如 0.8)，确保不打在边缘
 
-        dist_mix = target.dist * self.distance_decress_ratio
-        yaw_mix = self.yaw_tolerance_deg * (1 - self.distance_decress_ratio)
-        pitch_mix = self.pitch_tolerance_deg * (1 - self.distance_decress_ratio)
+        safe_scale = 0.8
+        dynamic_yaw_tol = math.degrees(math.atan((armor_w / 2.0) / target.dist)) * safe_scale
+        dynamic_pitch_tol = math.degrees(math.atan((armor_h / 2.0) / target.dist)) * safe_scale
 
-        self.yaw_tolerance_deg_mix = dist_mix + yaw_mix
-        self.pitch_tolerance_deg_mix = dist_mix + pitch_mix
+        # 限制最大和最小门限，防止距离过近或过远时门限异常
+        self.yaw_tolerance_deg_mix = np.clip(dynamic_yaw_tol, 1.0, 5.0)
+        self.pitch_tolerance_deg_mix = np.clip(dynamic_pitch_tol, 1.0, 5.0)
+
+        # Pitch 轴由于有重力下落波动，判断条件可以比 Yaw 稍微收紧一些
         if self.spin:
-            gimbal_control[2] = (abs(yaw) < self.yaw_tolerance_deg_mix and abs(pitch) < self.pitch_tolerance_deg_mix and target.dist <= self.shootable_dist and target.target_to_armor_dist <= (robot_list[target.id].armor_diagonal / 2))
+            gimbal_control[2] = (abs(yaw) < self.yaw_tolerance_deg_mix and 
+                                abs(pitch) < self.pitch_tolerance_deg_mix * 0.8 and 
+                                target.dist <= self.shootable_dist and 
+                                target.target_to_armor_dist <= (robot_list[target.id].armor_diagonal / 2))
         else:
-            gimbal_control[2] = (abs(yaw) < self.yaw_tolerance_deg_mix and abs(pitch) < self.pitch_tolerance_deg_mix and target.dist <= self.shootable_dist)
+            gimbal_control[2] = (abs(yaw) < self.yaw_tolerance_deg_mix and 
+                                abs(pitch) < self.pitch_tolerance_deg_mix * 0.8 and 
+                                target.dist <= self.shootable_dist)
 
         return gimbal_control
 

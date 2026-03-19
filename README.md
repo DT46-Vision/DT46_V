@@ -96,6 +96,7 @@
  - 两个缩写
  ```bash
     # nano.bashrc
-    alias rmvhik='ros2 launch rm_vision_bringup hik_nav.launch.py'
-    alias rmvmv='ros2 launch rm_vision_bringup mv.launch.py'
+    alias rmhiknav='ros2 launch rm_vision_bringup hik_nav.launch.py'
+    alias rmhik='ros2 launch rm_vision_bringup hik.launch.py'
+    alias rmmv='ros2 launch rm_vision_bringup mv.launch.py'
 ```
