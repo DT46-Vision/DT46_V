@@ -91,3 +91,11 @@
         lrwxrwxrwx 1 root root 7 3月 19 05:20 /dev/ttyPortIMU -> ttyACM1
         lrwxrwxrwx 1 root root 7 3月 19 05:20 /dev/ttyPortMCU -> ttyACM0
         ```
+
+# 关于一键启动
+ - 两个缩写
+ ```bash
+    # nano.bashrc
+    alias rmvhik='ros2 launch rm_vision_bringup hik_nav.launch.py'
+    alias rmvmv='ros2 launch rm_vision_bringup mv.launch.py'
+```
