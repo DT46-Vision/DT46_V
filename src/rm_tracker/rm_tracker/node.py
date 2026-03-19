@@ -612,22 +612,38 @@ class RmTracker(Node):
     # ---------- 决策回调 ----------
     def cb_opponent_color(self, msg: Decision):
         try:
+            # 1. 颜色跟随逻辑 (仅受 follow_decision 保护)
             follow = int(self.get_parameter('follow_decision').value)
-            if follow != 1:
-                return
-
-            if hasattr(msg, 'color'):
-                cur = int(self.get_parameter('target_color').value)
-                if msg.color != cur:
-                    color = int(msg.color)
-                    # 【关键修改】只调用 set_parameters 即可。它会自动触发 _on_params，
-                    # 并在 _on_params 内部安全加锁并修改 tracker 的颜色，不需要在这里再次赋值。
+            if follow == 1:
+                cur_color = int(self.get_parameter('target_color').value)
+                if int(msg.color) != cur_color:
+                    # 直接操作底层变量，规避参数服务死锁
+                    self.tracker.target_color = int(msg.color)
+                    self.tracker.tracker_state = self.tracker.LOST
+                    self.tracker.tracked_id = None
+                    
                     self.set_parameters([rclpy.parameter.Parameter(
                         'target_color',
                         rclpy.parameter.Parameter.Type.INTEGER,
-                        int(color)
+                        int(msg.color)
                     )])
-                    self.get_logger().info(f"追踪颜色切换为 {color}")
+                    self.get_logger().info(f"追踪颜色切换为 {msg.color}")
+
+            # 2. 弹速更新逻辑 (无论如何都实时跟随，不受 follow_decision 限制)
+            # 此时经过 msg 修复，读取到的才是真正的 23.x
+            if float(msg.bullet_speed) > 10.0:
+                if abs(float(msg.bullet_speed) - self.tracker.bullet_speed) > 0.1:
+                    # 核心：直接把弹速灌进追踪器，跳过所有中间件拦截
+                    self.tracker.bullet_speed = float(msg.bullet_speed)
+                    
+                    # 仅做外部参数同步
+                    self.set_parameters([rclpy.parameter.Parameter(
+                        'bullet_speed',
+                        rclpy.parameter.Parameter.Type.DOUBLE,
+                        float(msg.bullet_speed)
+                    )])
+                    # self.get_logger().info(f"弹速实时同步为 {msg.bullet_speed:.2f}")
+
         except Exception as e:
             self.get_logger().error(f"处理 Decision 异常：{e}")
 def main(args=None):

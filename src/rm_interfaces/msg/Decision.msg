@@ -8,3 +8,6 @@ uint16 remain_bullet      # 剩余子弹
 uint8 match_progress      # 比赛进程 （准备为1,开始为4）
 uint8 occupation          # 事件
 uint8 color               # 颜色
+float32 yaw               # 角度
+int32 can_fire
+float32 bullet_speed

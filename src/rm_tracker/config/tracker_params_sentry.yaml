@@ -57,7 +57,7 @@ rm_tracker:
     min_spinning_vel: 1.0
 
     # [发射参数]
-    bullet_speed: 32.0            # 弹速 (m/s)
+    bullet_speed: 25.0            # 弹速 (m/s)
 
     # 发弹角度阈值
     shootable_dist: 10.0

@@ -17,7 +17,7 @@ rm_detector:
     roi_crop: false
     roi_scale: 0.4
     row_stretch: 2.22
-    col_stretch: 0.6
+    col_stretch: 0.7
 
     # ---- 图像处理参数 ----
     binary_val: 120

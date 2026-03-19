@@ -773,18 +773,18 @@ class Tracker:
         return [delta_yaw, delta_pitch, True]
 
     def gimbal_to_deg(self, gimbal_control):
-        return [gimbal_control[0] * RAD2DEG, gimbal_control[1] * RAD2DEG, False]
+        # 修复：保留原有的解算有效性标志 gimbal_control[2]
+        return [gimbal_control[0] * RAD2DEG, gimbal_control[1] * RAD2DEG, gimbal_control[2]]
 
     def can_fire(self, target, gimbal_control):
-        yaw, pitch = gimbal_control[0], gimbal_control[1]
+        # 提取传入的有效性标志 is_valid
+        yaw, pitch, is_valid = gimbal_control[0], gimbal_control[1], gimbal_control[2]
         
         # 获取当前装甲板的物理尺寸 (米)
         armor_w = robot_list[target.id].armor_width / 1000.0
         armor_h = robot_list[target.id].armor_height / 1000.0
         
         # 动态计算物理允许的角度偏差界限 (弧度转角度)
-        # 留出一定的缩放冗余 (例如 0.8)，确保不打在边缘
-
         safe_scale = 0.8
         dynamic_yaw_tol = math.degrees(math.atan((armor_w / 2.0) / target.dist)) * safe_scale
         dynamic_pitch_tol = math.degrees(math.atan((armor_h / 2.0) / target.dist)) * safe_scale
@@ -792,6 +792,11 @@ class Tracker:
         # 限制最大和最小门限，防止距离过近或过远时门限异常
         self.yaw_tolerance_deg_mix = np.clip(dynamic_yaw_tol, 1.0, 5.0)
         self.pitch_tolerance_deg_mix = np.clip(dynamic_pitch_tol, 1.0, 5.0)
+
+        # 修复：如果前面的弹道解算无效（如弹速过低），直接禁止发弹
+        if not is_valid:
+            gimbal_control[2] = False
+            return gimbal_control
 
         # Pitch 轴由于有重力下落波动，判断条件可以比 Yaw 稍微收紧一些
         if self.spin:
@@ -1027,6 +1032,8 @@ class Tracker:
         color_spin = (0, 255, 0) if is_spin else (0, 0, 255)
         text_spin = "SPIN" if is_spin else "NORMAL"
 
+        bullet_speed = snapshot['bullet_speed']
+
         hud_lines = [
             (f"[{text_spin}]", font_large, color_spin, thick_bold, 5 * scale),
             (f"Yaw Vel: {ekf_yaw_vel:5.2f} rad/s", font_normal, (255, 255, 255), thick_normal, step_y * 1),
@@ -1036,7 +1043,8 @@ class Tracker:
             (f"Yaw    : {gc_yaw:5.2f} deg", font_normal, (255, 255, 255), thick_normal, step_y * 5),
             (f"P_Tol  : {pitch_tol:5.2f} deg", font_normal, (255, 255, 255), thick_normal, step_y * 6),
             (f"Y_Tol  : {yaw_tol:5.2f} deg", font_normal, (255, 255, 255), thick_normal, step_y * 7),
-            (f"[{text_fire}]", font_large, color_fire, thick_bold, step_y * 8 + 5 * scale)
+            (f"Bullet Speed: {bullet_speed:5.2f} m/s", font_normal, (255, 255, 255), thick_normal, step_y * 8),
+            (f"[{text_fire}]", font_large, color_fire, thick_bold, step_y * 9 + 5 * scale)
         ]
 
         for text, font_scale, color, thickness, y_offset in hud_lines:
@@ -1073,5 +1081,6 @@ class Tracker:
             'pitch_tolerance_deg': self.pitch_tolerance_deg_mix,
             'gimbal_control': list(self.gimbal_control) if self.gimbal_control else None,
             'ekf_yaw_vel': self.target_state[7],
-            'text_size': self.text_size
+            'text_size': self.text_size,
+            'bullet_speed': self.bullet_speed
         }
