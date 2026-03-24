@@ -3,7 +3,7 @@ rm_tracker:
     # ------------------------ NODE -----------------------
     log_throttle_ms: 1000
 
-    follow_decision: false    # 是否跟随决策节点的颜色选择
+    follow_decision: true    # 是否跟随决策节点的颜色选择
 
     # 陀螺仪到相机 (IMU -> Cam) 旋转标定
     rotation_rpy_r: 0.0
@@ -62,8 +62,8 @@ rm_tracker:
     # 发弹角度阈值
     shootable_dist: 10.0
     distance_decress_ratio: 0.60
-    yaw_tolerance_deg: 5.0     # 允许发射的 yaw 角度阈值
-    pitch_tolerance_deg: 5.0   # 允许发射的 pitch 角度阈值
+    yaw_tolerance_deg: 7.0     # 允许发射的 yaw 角度阈值
+    pitch_tolerance_deg: 7.0   # 允许发射的 pitch 角度阈值
 
     text_size: 1.5
 

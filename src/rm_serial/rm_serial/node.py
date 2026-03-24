@@ -39,7 +39,7 @@ class SerialNode(Node):
 
         self.get_params()
 
-        self.pub_uart_receive_decision = self.create_publisher(Decision, "/nav/decision", 10)
+        self.pub_uart_receive_decision = self.create_publisher(Decision, "/nav/decision", qos)
         self.sub_gimbal_control = self.create_subscription(GimbalControl, "tracker/gimbal_control", self.gimbal_control_callback, qos_profile_sensor_data)
         self.pub_uart_receive_imu = self.create_publisher(Vector3Stamped, '/imu/rpy', qos)
 
@@ -116,8 +116,8 @@ class SerialNode(Node):
             self.send_datas.can_fire = msg.can_fire
 
     def receive_data(self):
-        packet_length = 16
-        self.get_logger().info("接收数据线程已启动 (CRC16 Mode - 16 Bytes)")
+        packet_length = 20
+        self.get_logger().info("接收数据线程已启动 (CRC16 Mode - 20 Bytes)")
 
         try:
             self.serial.reset_input_buffer()
@@ -145,7 +145,7 @@ class SerialNode(Node):
                 if calculated_crc != received_crc:
                     continue
 
-                _, detect_color, roll, pitch, yaw = struct.unpack("<BBfff", data_payload)
+                _, detect_color, roll, pitch, yaw, bullet_speed = struct.unpack("<BBffff", data_payload)
 
                 if self.pub_rpy:
                     # 发布 IMU 消息
@@ -162,6 +162,7 @@ class SerialNode(Node):
                 serial_decision_msg.header.frame_id = 'serial_receive_frame'
                 serial_decision_msg.header.stamp = self.get_clock().now().to_msg()
                 serial_decision_msg.color = detect_color
+                serial_decision_msg.bullet_speed = bullet_speed
                 self.pub_uart_receive_decision.publish(serial_decision_msg)
 
             except (serial.SerialException, struct.error, ValueError, OSError) as e:
