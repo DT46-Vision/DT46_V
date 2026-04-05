@@ -26,18 +26,18 @@ class RobotAppearance:
 
 # 使用列表存储所有装甲板外观实例
 robot_list: List[RobotAppearance] = [
-    RobotAppearance(id=0, armor_width=230.0, armor_height=125.0, robot_r1=0.3, robot_r2=0.285), # 红 1
+    RobotAppearance(id=0, armor_width=230.0, armor_height=125.0, robot_r1=0.3, robot_r2=0.285), # 蓝 1
     RobotAppearance(id=1, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21),
-    RobotAppearance(id=2, armor_width=135.0, armor_height=125.0, robot_r1=0.3, robot_r2=0.27), # 红 3
+    RobotAppearance(id=2, armor_width=135.0, armor_height=125.0, robot_r1=0.3, robot_r2=0.27), # 蓝 3
     RobotAppearance(id=3, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21),
     RobotAppearance(id=4, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21),
-    RobotAppearance(id=5, armor_width=135.0, armor_height=125.0, robot_r1=0.24, robot_r2=0.22), # 红 哨
-    RobotAppearance(id=6, armor_width=230.0, armor_height=125.0, robot_r1=0.3, robot_r2=0.285), # 蓝 1
+    RobotAppearance(id=5, armor_width=135.0, armor_height=125.0, robot_r1=0.24, robot_r2=0.22), # 蓝 哨
+    RobotAppearance(id=6, armor_width=230.0, armor_height=125.0, robot_r1=0.3, robot_r2=0.285), # 红 1
     RobotAppearance(id=7, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21),
-    RobotAppearance(id=8, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21), # 蓝 3
+    RobotAppearance(id=8, armor_width=135.0, armor_height=125.0, robot_r1=0.3, robot_r2=0.27), # 红 3
     RobotAppearance(id=9, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21),
     RobotAppearance(id=10, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21),
-    RobotAppearance(id=11, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21) # 蓝 哨
+    RobotAppearance(id=11, armor_width=135.0, armor_height=125.0, robot_r1=0.23, robot_r2=0.21) # 红 哨
 ]
 
 def normalize_angle(angle):
