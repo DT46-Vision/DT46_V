@@ -523,8 +523,8 @@ class RmTracker(Node):
                                 self.get_logger().warn(log_msg)
                 
                 if self.log_throttler.should_log("gimbal_control_info"):
-                    target_color_str = f"{self.tracker.c.PINK}跟踪红色{self.tracker.c.RESET}" if self.tracker.target_color == 0 else f"{self.tracker.c.PINK}跟踪蓝色{self.tracker.c.RESET}" if self.tracker.target_color == 1 else "我不知道"
-                    self.get_logger().info(f"[rm_tracker] FPS: {self.check_and_get_fps():.2f} {target_color_str} Gimbal - pitch: {gimbal_control[1]:.2f} || yaw: {gimbal_control[0]:.2f} || fire: {gimbal_control[2]:.0f}")
+                    target_color_str = f"{self.tracker.c.PINK}跟踪{self.tracker.c.RED}红色{self.tracker.c.RESET}" if self.tracker.target_color == 0 else f"{self.tracker.c.PINK}跟踪{self.tracker.c.BLUE}蓝色{self.tracker.c.RESET}" if self.tracker.target_color == 1 else "我不知道"
+                    self.get_logger().info(f"{self.tracker.c.PINK}[rm_tracker] {self.tracker.c.PINK}FPS{self.tracker.c.RESET}: {self.tracker.c.CYAN}{self.check_and_get_fps():.2f}{self.tracker.c.RESET} {target_color_str} {self.tracker.c.PINK}Gimbal{self.tracker.c.RESET} - {self.tracker.c.PINK}pitch{self.tracker.c.RESET}: {self.tracker.c.CYAN}{gimbal_control[1]:.2f}{self.tracker.c.RESET} || {self.tracker.c.PINK}yaw{self.tracker.c.RESET}: {self.tracker.c.CYAN}{gimbal_control[0]:.2f}{self.tracker.c.RESET} || {self.tracker.c.PINK}fire{self.tracker.c.RESET}: {self.tracker.c.CYAN}{gimbal_control[2]:.0f}{self.tracker.c.RESET}")
 
             except Exception as e:
                 self.get_logger().error(f"处理线程异常: {e}")

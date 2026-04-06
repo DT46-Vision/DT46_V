@@ -1,4 +1,6 @@
 #include <rclcpp/rclcpp.hpp>
+#include <rm_interfaces/msg/detail/armor_debug_info__struct.hpp>
+#include <rm_interfaces/msg/detail/armors_debug_msg__struct.hpp>
 #include <sensor_msgs/msg/image.hpp>
 #include <sensor_msgs/msg/camera_info.hpp>
 #include <sensor_msgs/image_encodings.hpp>
@@ -20,6 +22,8 @@
 #include "rm_detector/classifier.hpp"
 #include "rm_interfaces/msg/armor_info.hpp"
 #include "rm_interfaces/msg/armors_msg.hpp"
+#include "rm_interfaces/msg/armor_debug_info.hpp"
+#include "rm_interfaces/msg/armors_debug_msg.hpp"
 #include "rcl_interfaces/msg/set_parameters_result.hpp"
 
 using namespace std::chrono;
@@ -114,8 +118,8 @@ namespace DT46_VISION {
                 "/camera_info", 10, std::bind(&ArmorDetectorNode::camera_info_callback, this, std::placeholders::_1));
 
             // 【修改点】将装甲板坐标的发布策略改为 SensorDataQoS，消除底层的缓冲队列延迟
+            publisher_armors_debug_ = this->create_publisher<rm_interfaces::msg::ArmorsDebugMsg>("/detector/armors_debug_info", sensor_qos);
             publisher_armors_     = this->create_publisher<rm_interfaces::msg::ArmorsMsg>("/detector/armors_info", sensor_qos);
-            
             // （可选优化）如果是比赛实战，建议把下面这些 debug 图像的发布也都改成 sensor_qos，防止因为图像推流挤占网卡带宽导致卡顿
             publisher_result_img_ = this->create_publisher<sensor_msgs::msg::Image>("/detector/result", sensor_qos);
             publisher_crop_img_   = this->create_publisher<sensor_msgs::msg::Image>("/detector/crop_img", sensor_qos);
@@ -266,8 +270,13 @@ namespace DT46_VISION {
                 }
 
                 rm_interfaces::msg::ArmorsMsg armors_msg;
+                rm_interfaces::msg::ArmorsDebugMsg armors_debug_msg;
+
                 armors_msg.header.stamp = this->get_clock()->now();
                 armors_msg.header.frame_id = "camera_frame";
+
+                armors_debug_msg.header.stamp = armors_msg.header.stamp;
+                armors_debug_msg.header.frame_id = armors_msg.header.frame_id;
 
                 if (!detection_error && !armors.empty()) {
                     had_detection_in_period = true;
@@ -275,6 +284,7 @@ namespace DT46_VISION {
 
                     for (const auto& armor : armors) {
                         rm_interfaces::msg::ArmorInfo armor_info;
+
                         armor_info.armor_id = armor.armor_id;
 
                         // 这里的 processArmorCorners 可能会耗时，需注意优化
@@ -284,12 +294,31 @@ namespace DT46_VISION {
                         armor_info.dx = dx; armor_info.dy = dy; armor_info.dz = dz;
                         armor_info.yaw = yaw;
                         // armor_info.rz = rz;
-                        last_detected_armors.push_back(armor_info);
+                        last_detected_armors.push_back(armor_info); // 保证周期内状态同步，下面还要用当前信息打印在终端的
+                        
                         armors_msg.armors.push_back(armor_info);
+                        
+                        rm_interfaces::msg::ArmorDebugInfo armor_debug_info;
+
+                        armor_debug_info.armor_id = armor_info.armor_id;
+                        armor_debug_info.color = armor.color;
+
+                        armor_debug_info.l_light_up_dx = armor.light1_up.x;
+                        armor_debug_info.l_light_up_dy = armor.light1_up.y;
+                        armor_debug_info.l_light_down_dx = armor.light1_down.x;
+                        armor_debug_info.l_light_down_dy = armor.light1_down.y;
+
+                        armor_debug_info.r_light_up_dx = armor.light2_up.x;
+                        armor_debug_info.r_light_up_dy = armor.light2_up.y;
+                        armor_debug_info.r_light_down_dx = armor.light2_down.x;
+                        armor_debug_info.r_light_down_dy = armor.light2_down.y;
+
+                        armors_debug_msg.armors_debug.push_back(armor_debug_info);
                     }
                 }
 
                 publisher_armors_->publish(armors_msg);
+                publisher_armors_debug_->publish(armors_debug_msg);
 
                 // 图片发布建议加上 display_mode_ 判断，否则带宽压力巨大
                 if (display_mode_) {
@@ -390,6 +419,7 @@ namespace DT46_VISION {
         // ---- ROS 通道
         rclcpp::Subscription<sensor_msgs::msg::Image>::SharedPtr        sub_image_;
         rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr   sub_camera_info_;
+        rclcpp::Publisher<rm_interfaces::msg::ArmorsDebugMsg>::SharedPtr publisher_armors_debug_;
         rclcpp::Publisher<rm_interfaces::msg::ArmorsMsg>::SharedPtr     publisher_armors_;
         rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr           publisher_result_img_;
         rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr           publisher_armor_img_;

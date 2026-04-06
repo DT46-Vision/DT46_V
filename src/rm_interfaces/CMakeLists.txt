@@ -14,6 +14,8 @@ find_package(std_msgs REQUIRED)
 # find_package(<dependency> REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/ArmorDebugInfo.msg"
+  "msg/ArmorsDebugMsg.msg"
   "msg/ArmorsMsg.msg"
   "msg/ArmorInfo.msg"
   "msg/GimbalControl.msg"
