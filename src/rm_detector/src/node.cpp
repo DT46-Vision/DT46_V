@@ -115,7 +115,7 @@ namespace DT46_VISION {
             sub_image_ = this->create_subscription<sensor_msgs::msg::Image>(
                 "/image_raw", sensor_qos, std::bind(&ArmorDetectorNode::image_callback, this, std::placeholders::_1));
             sub_camera_info_ = this->create_subscription<sensor_msgs::msg::CameraInfo>(
-                "/camera_info", 10, std::bind(&ArmorDetectorNode::camera_info_callback, this, std::placeholders::_1));
+                "/camera_info", sensor_qos, std::bind(&ArmorDetectorNode::camera_info_callback, this, std::placeholders::_1));
 
             // 【修改点】将装甲板坐标的发布策略改为 SensorDataQoS，消除底层的缓冲队列延迟
             publisher_armors_debug_ = this->create_publisher<rm_interfaces::msg::ArmorsDebugMsg>("/detector/armors_debug_info", sensor_qos);
@@ -126,6 +126,7 @@ namespace DT46_VISION {
             publisher_bin_img_    = this->create_publisher<sensor_msgs::msg::Image>("/detector/bin_img", sensor_qos);
             publisher_armor_img_  = this->create_publisher<sensor_msgs::msg::Image>("/detector/img_armor", sensor_qos);
             publisher_armor_processed_img_  = this->create_publisher<sensor_msgs::msg::Image>("/detector/img_armor_processed", sensor_qos);
+            publisher_debug_img_ = this->create_publisher<sensor_msgs::msg::Image>("/detector/img_debug", sensor_qos);
 
             // 工作线程detect_color_
             running_.store(true);
@@ -257,13 +258,14 @@ namespace DT46_VISION {
                 cv::Mat frame = frame_ptr->image;
 
                 // -------- 下面是原有的识别与发布逻辑 (保持不变) --------
-                cv::Mat crop, bin, result, img_armor, img_armor_processed;
+                cv::Mat crop, bin, result, img_armor, img_armor_processed, debug_img;
                 std::vector<Armor> armors;
                 bool detection_error = false;
                 try {
                     armors = detector_->detect_armors(frame);
                     // 注意：display() 内部如果涉及耗时绘图，建议仅在调试时开启
                     std::tie(crop, bin, result, img_armor, img_armor_processed) = detector_->display();
+                    debug_img = detector_->img;
                 } catch (const std::exception& e) {
                     RCLCPP_ERROR(this->get_logger(), "Detection error: %s", e.what());
                     detection_error = true;
@@ -295,9 +297,9 @@ namespace DT46_VISION {
                         armor_info.yaw = yaw;
                         // armor_info.rz = rz;
                         last_detected_armors.push_back(armor_info); // 保证周期内状态同步，下面还要用当前信息打印在终端的
-                        
+
                         armors_msg.armors.push_back(armor_info);
-                        
+
                         rm_interfaces::msg::ArmorDebugInfo armor_debug_info;
 
                         armor_debug_info.armor_id = armor_info.armor_id;
@@ -332,6 +334,8 @@ namespace DT46_VISION {
                         publisher_armor_img_->publish(*cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", img_armor).toImageMsg());
                     if (!img_armor_processed.empty())
                         publisher_armor_processed_img_->publish(*cv_bridge::CvImage(std_msgs::msg::Header(), "mono8", img_armor_processed).toImageMsg());
+                    if (!debug_img.empty())
+                        publisher_debug_img_->publish(*cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", debug_img).toImageMsg());
                 }
 
                 // -------- 打印节流逻辑 (保持不变) --------
@@ -421,6 +425,7 @@ namespace DT46_VISION {
         rclcpp::Subscription<sensor_msgs::msg::CameraInfo>::SharedPtr   sub_camera_info_;
         rclcpp::Publisher<rm_interfaces::msg::ArmorsDebugMsg>::SharedPtr publisher_armors_debug_;
         rclcpp::Publisher<rm_interfaces::msg::ArmorsMsg>::SharedPtr     publisher_armors_;
+        rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr           publisher_debug_img_;
         rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr           publisher_result_img_;
         rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr           publisher_armor_img_;
         rclcpp::Publisher<sensor_msgs::msg::Image>::SharedPtr           publisher_armor_processed_img_;

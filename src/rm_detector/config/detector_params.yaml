@@ -1,6 +1,6 @@
 rm_detector:
   ros__parameters:
-    cls_model_file: 'mlp.onnx'   # 文件名
+    cls_model_file: 'RM_Armor_CNN_sim.onnx'   # 文件名
 
     # ---- 灯条过滤参数 ----
     light_area_min: 5
