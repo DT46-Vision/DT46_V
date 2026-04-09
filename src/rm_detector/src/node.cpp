@@ -246,7 +246,8 @@ namespace DT46_VISION {
                     latest_frame_ = nullptr;
                 }
                 // ==================== 核心修改区域 End ====================
-
+                // 推荐使用图像自带的时间戳，确保全链路对齐
+                auto sync_stamp = frame_ptr->header.stamp;
                 // 拿到数据后开始干活，这部分逻辑不用变
                 frame_count++;
 
@@ -274,10 +275,10 @@ namespace DT46_VISION {
                 rm_interfaces::msg::ArmorsMsg armors_msg;
                 rm_interfaces::msg::ArmorsDebugMsg armors_debug_msg;
 
-                armors_msg.header.stamp = this->get_clock()->now();
+                armors_msg.header.stamp = sync_stamp; // 使用固定好的时间戳
                 armors_msg.header.frame_id = "camera_frame";
 
-                armors_debug_msg.header.stamp = armors_msg.header.stamp;
+                armors_debug_msg.header.stamp = sync_stamp; // 使用固定好的时间戳
                 armors_debug_msg.header.frame_id = armors_msg.header.frame_id;
 
                 if (!detection_error && !armors.empty()) {
@@ -324,18 +325,22 @@ namespace DT46_VISION {
 
                 // 图片发布建议加上 display_mode_ 判断，否则带宽压力巨大
                 if (display_mode_) {
+                    // 先构造一个通用的 Header
+                    std_msgs::msg::Header img_header;
+                    img_header.stamp = sync_stamp;
+                    img_header.frame_id = "camera_frame";
                     if (!crop.empty())
-                        publisher_crop_img_->publish(*cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", crop).toImageMsg());
+                        publisher_crop_img_->publish(*cv_bridge::CvImage(img_header, "bgr8", crop).toImageMsg());
                     if (!bin.empty())
-                        publisher_bin_img_->publish(*cv_bridge::CvImage(std_msgs::msg::Header(), "mono8", bin).toImageMsg());
+                        publisher_bin_img_->publish(*cv_bridge::CvImage(img_header, "mono8", bin).toImageMsg());
                     if (!result.empty())
-                        publisher_result_img_->publish(*cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", result).toImageMsg());
+                        publisher_result_img_->publish(*cv_bridge::CvImage(img_header, "bgr8", result).toImageMsg());
                     if (!img_armor.empty())
-                        publisher_armor_img_->publish(*cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", img_armor).toImageMsg());
+                        publisher_armor_img_->publish(*cv_bridge::CvImage(img_header, "bgr8", img_armor).toImageMsg());
                     if (!img_armor_processed.empty())
-                        publisher_armor_processed_img_->publish(*cv_bridge::CvImage(std_msgs::msg::Header(), "mono8", img_armor_processed).toImageMsg());
+                        publisher_armor_processed_img_->publish(*cv_bridge::CvImage(img_header, "mono8", img_armor_processed).toImageMsg());
                     if (!debug_img.empty())
-                        publisher_debug_img_->publish(*cv_bridge::CvImage(std_msgs::msg::Header(), "bgr8", debug_img).toImageMsg());
+                        publisher_debug_img_->publish(*cv_bridge::CvImage(img_header, "bgr8", debug_img).toImageMsg());
                 }
 
                 // -------- 打印节流逻辑 (保持不变) --------
